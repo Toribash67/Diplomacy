@@ -88,13 +88,19 @@ Implemented:
 - movement orders
 - hold orders
 - support orders
+- convoy orders
 - movement validation
 - support validation
+- convoy validation
 - support cuts
 - dislodgement
 - self-dislodgement prevention
 - head-to-head movement handling
 - movement into vacated provinces
+- army movement by convoy
+- convoy disruption
+- adjacent-province convoy intent
+- Szykman-style convoy paradox handling
 - retreat option generation
 - retreat orders
 - disband orders
@@ -102,14 +108,104 @@ Implemented:
 - phase progression through movement and retreat phases
 - fall supply-center ownership updates
 - build phase adjudication
+- civil disorder disband selection
 
 Known gaps:
 
-- convoys
-- convoy disruption
-- convoy paradoxes
-- more DATC-style movement edge cases
 - game-end detection
+- machine-readable result codes
+- service-level concepts such as deadlines, press, draws, and persistence
+
+## Engine Findings
+
+The engine is now far enough along that several design constraints are worth preserving.
+
+### Pure Adjudication Boundary
+
+`adjudicate(previousState, submittedOrders, variantDefinition)` remains the right boundary. It keeps adjudication deterministic and easy to test: the caller supplies a complete phase state, raw submitted orders, and a map definition; the engine returns the next state, per-order results, dislodgements, retreats, and invalid orders.
+
+The function is intentionally phase-aware rather than split into separate public entry points. Movement, retreat, and build adjudication share the same state/result vocabulary, while invalid phase-specific orders are still reported as order results instead of throwing.
+
+### Province Versus Location Is Essential
+
+The province/location split is not just a map-modeling detail. It drives core rules:
+
+- one unit occupies a province even when a province has multiple coast locations
+- attacks against different coasts of the same province still contest the same province
+- fleet movement and support can depend on the current coast
+- armies can target the land location of a multi-coast province without caring about coast
+- retreat and build availability are province-based, not location-count-based
+
+Do not collapse these concepts unless the replacement can still represent Spain, Bulgaria, and St Petersburg correctly.
+
+### Movement Resolution Is Iterative
+
+Movement adjudication has dependencies that cannot be handled by a single linear pass. The current resolver computes active moves, support cuts, attack strengths, dislodgements, convoy disruptions, and dislodged supports, then recalculates when later facts change earlier assumptions.
+
+Important dependency loops include:
+
+- a convoyed army may cut support that would otherwise dislodge a convoying fleet
+- a dislodged convoying fleet can make the army's move inactive
+- a dislodged supporter loses its support
+- a move that becomes inactive must stop cutting support or contesting its destination
+- self-dislodgement checks depend on the final dislodgement strength, not just nominal attack strength
+
+This is why the engine tracks active move orders separately from submitted move orders.
+
+### Convoy Semantics
+
+Convoys are represented explicitly with `ConvoyOrder`, and army moves can opt into `viaConvoy`. A move can be treated as convoyed when:
+
+- the order says `viaConvoy`
+- the destination is non-adjacent and a route exists
+- an adjacent move has convoy intent from at least one convoying fleet of the moving power
+
+Foreign fleets can provide convoy routes, but they cannot by themselves express adjacent-convoy intent. This prevents "kidnapping" an adjacent army onto a convoy route the army's owner did not indicate.
+
+The engine deliberately does not fall back to land movement when a move explicitly intended to use convoy and the convoy fails. That behavior matches the DATC preferences used by the test suite.
+
+For adjacent convoy attacks, the attack is not treated as a normal head-to-head land battle. This matters for swaps, support cuts, dislodgement, and retreat options. When an adjacent convoyed attack dislodges a unit, the defender may retreat to the convoyed army's original province under the 2023 rule preference covered by DATC.
+
+### Convoy Paradoxes
+
+The engine follows the Szykman-style preference encoded in the DATC expectations:
+
+- support is not cut when cutting it would create the dependency that saves or destroys a necessary convoying fleet
+- the paradoxical convoying army fails rather than being allowed to both depend on and invalidate its own route
+- multi-route convoys only become paradoxical when the attacked convoying fleet is necessary to the route
+- second-order convoy paradoxes are handled by detecting dependency cores across convoyed moves and supports
+
+This logic is intentionally conservative. If a convoy has another surviving route, support can still be cut normally.
+
+### Supports And Self-Dislodgement
+
+Attack strength and dislodgement strength are related but not identical. Support from the defender's own power can help an attack contest a province, but it cannot be used to dislodge that defender. The engine records support counts by power so it can subtract defender-owned support when checking whether dislodgement is legal.
+
+This distinction is required for DATC self-dislodgement and beleaguered-garrison cases.
+
+### Retreats
+
+Retreat options are generated from the board after movement. A retreat option is unavailable when:
+
+- the destination province is occupied after movement
+- the destination province was the attack origin
+- the destination province was a standoff
+- another retreat resolves to the same province
+
+The attack origin exception is adjusted for adjacent convoyed attacks: the convoyed army's land origin is not treated as the direct attack origin for retreat exclusion.
+
+### Builds And Civil Disorder
+
+Build adjudication compares owned supply centers to unit count in Winter. Builds are legal only in open owned home centers, and a province with any occupied coast is occupied for build purposes.
+
+When a power fails to submit enough disbands, civil disorder removes units deterministically:
+
+- greatest distance from any owned supply center first
+- fleets before armies when distance ties
+- province name alphabetically when type and distance tie
+- unit id as the final deterministic tie-breaker
+
+Distance is measured on a province graph derived from all map adjacencies, ignoring unit type, matching DATC civil disorder expectations.
 
 ## Engine Roadmap
 
@@ -124,13 +220,13 @@ To finish the classic rules engine, work through this order:
    - Support build orders in open owned home centers.
    - Support forced and ordered disbands when a power has too many units.
    - Advance Winter to next Spring movement.
-   - Automatic disbands currently use deterministic unit-id order; this is stable but can be replaced by a configurable policy later.
+   - Automatic disbands use DATC civil disorder distance ordering.
 
-3. Movement correctness hardening
+3. Movement correctness hardening - done
    - Add DATC-style tests for supports, head-to-head moves, beleaguered garrisons, standoffs, and self-dislodgement edge cases.
    - Fix adjudication behavior where those tests expose gaps.
 
-4. Convoys
+4. Convoys - done
    - Add convoy order types and validation.
    - Support army movement by convoy.
    - Support convoy disruption.
@@ -157,7 +253,9 @@ Classic 1901 tests cover:
 
 As the rules grow, we should add DATC-style adjudication fixtures. If the engine is ever ported to Rust for bot/search performance, these fixtures should become cross-language conformance tests.
 
-DATC v3.0 Chapter 6 is now imported into `packages/engine/src/datc/datcCases.ts` as repo-owned fixture data. The current Node test suite registers unmapped cases as TODO conformance tests until the raw DATC order text is mapped to typed engine states, orders, and assertions. Sections 6.A and 6.B are executable against the classic map through the DATC harness. Section 6.C is partially executable; the remaining 6.C cases require convoy support.
+DATC v3.0 Chapter 6 is imported into `packages/engine/src/datc/datcCases.ts` as repo-owned fixture data. All Chapter 6 cases are now executable against the classic map through the DATC harness, with `0` TODO conformance cases. The DATC harness maps raw DATC order text into typed engine units and orders, including shorthand support/convoy notation and common DATC spelling quirks.
+
+The DATC suite is the main conformance safety net for movement, convoy, retreat, build, and civil disorder behavior. If the engine is ever ported to Rust for bot/search performance, these fixtures should become cross-language conformance tests.
 
 ## Future Layers
 
@@ -170,6 +268,51 @@ The first UI should be a local playable web app that consumes the engine directl
 - adjudicate a phase
 - show results and explanations
 - inspect retreats/builds
+
+### Frontend And Map Roadmap
+
+The rules engine is now stable enough to start a local frontend. The next milestone should be a playable classic-map prototype, not a backend service.
+
+Recommended order:
+
+1. Create a frontend package
+   - Add a web app package beside `packages/engine`.
+   - Consume the engine package directly.
+   - Start with a local development server and no persistence.
+
+2. Add a classic map render layer
+   - Use `classic1901` provinces, locations, and initial state as the rules source of truth.
+   - Keep render metadata separate from rules data.
+   - Store SVG path geometry, label positions, unit positions, and coast anchors keyed by `ProvinceId` and `LocationId`.
+   - Prefer an SVG board first because clickable provinces, overlays, labels, and unit markers are straightforward.
+
+3. Render board state
+   - Show province ownership.
+   - Show current units at stable unit anchor points.
+   - Distinguish armies, fleets, and fleet coasts.
+   - Add enough visual state for selected units, legal-looking destinations, contested areas, and dislodged units.
+
+4. Build order entry
+   - Start with hold and move.
+   - Add support and convoy once selection flows are clear.
+   - Add retreat and build screens after movement orders work.
+   - Let the engine remain authoritative; frontend validation should help the user but not replace adjudication.
+
+5. Wire phase adjudication
+   - Keep a local in-memory `GameState`.
+   - Submit typed orders into `adjudicate`.
+   - Display per-order result status and reason.
+   - Advance into retreat/build phases when the returned state requires it.
+
+6. Add local game ergonomics
+   - Order list editing and deletion.
+   - Clear phase/result panels.
+   - Board overlays for successful moves, failed moves, dislodgements, retreats, and builds.
+   - Optional import/export of a JSON game snapshot before building a real backend.
+
+7. Defer backend work
+   - Do not introduce users, deadlines, press, draw votes, or persistence until the local UI can play through phases.
+   - Once the local UI is usable, the async service can persist snapshots and submitted orders around the same pure engine boundary.
 
 ### Async Service
 
