@@ -81,6 +81,7 @@ export type MoveOrder = {
   readonly type: "move";
   readonly unitId: UnitId;
   readonly to: LocationId;
+  readonly viaConvoy?: boolean;
 };
 
 export type SupportOrder = {
@@ -89,6 +90,14 @@ export type SupportOrder = {
   readonly unitId: UnitId;
   readonly supportedUnitId: UnitId;
   readonly to?: LocationId;
+};
+
+export type ConvoyOrder = {
+  readonly id: OrderId;
+  readonly type: "convoy";
+  readonly unitId: UnitId;
+  readonly convoyedUnitId: UnitId;
+  readonly to: LocationId;
 };
 
 export type RetreatOrder = {
@@ -113,7 +122,7 @@ export type BuildOrder = {
   readonly location: LocationId;
 };
 
-export type Order = HoldOrder | MoveOrder | SupportOrder | RetreatOrder | DisbandOrder | BuildOrder;
+export type Order = HoldOrder | MoveOrder | SupportOrder | ConvoyOrder | RetreatOrder | DisbandOrder | BuildOrder;
 
 export type OrderStatus = "succeeds" | "fails" | "invalid";
 

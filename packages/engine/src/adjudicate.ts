@@ -1,6 +1,7 @@
 import type {
   AdjudicationResult,
   BuildOrder,
+  ConvoyOrder,
   DisbandOrder,
   Dislodgement,
   GameState,
@@ -16,6 +17,7 @@ import type {
   RetreatOrder,
   SupportOrder,
   Unit,
+  UnitId,
   VariantDefinition,
 } from "./types.js";
 
@@ -32,6 +34,8 @@ interface Attack {
   readonly to: LocationId;
   readonly toProvince: ProvinceId;
   readonly strength: number;
+  readonly supportPowerCounts: ReadonlyMap<PowerId, number>;
+  readonly viaConvoy: boolean;
 }
 
 interface MovementContext {
@@ -40,6 +44,11 @@ interface MovementContext {
   readonly attacksByUnitId: ReadonlyMap<string, Attack>;
   readonly defenseStrengthByUnitId: ReadonlyMap<string, number>;
   readonly variant: VariantDefinition;
+}
+
+interface ConvoyContext {
+  readonly convoyOrders: readonly (NormalizedOrder & { order: ConvoyOrder })[];
+  readonly disruptedFleetIds: ReadonlySet<string>;
 }
 
 export function adjudicate(
@@ -85,7 +94,7 @@ function adjudicateMovement(
       continue;
     }
 
-    const validationError = validateOrder(submittedOrder, unit, previousState, variant);
+    const validationError = validateOrder(submittedOrder, unit, previousState, submittedOrders, variant);
     if (validationError) {
       orderResults[submittedOrder.id] = invalid(submittedOrder, validationError);
       continue;
@@ -106,17 +115,38 @@ function adjudicateMovement(
 
   const moveOrders = normalizedOrders.filter((item): item is NormalizedOrder & { order: MoveOrder } => item.order.type === "move");
   const supportOrders = normalizedOrders.filter((item): item is NormalizedOrder & { order: SupportOrder } => item.order.type === "support");
+  const convoyOrders = normalizedOrders.filter((item): item is NormalizedOrder & { order: ConvoyOrder } => item.order.type === "convoy");
   const invalidSupportOrderIds = findInvalidSupportOrderIds(supportOrders, moveOrders);
   const validSupportOrders = supportOrders.filter((item) => !invalidSupportOrderIds.has(item.order.id));
-  let cutSupportOrderIds = findCutSupports(validSupportOrders, moveOrders, variant);
-  let attacks = buildAttacks(moveOrders, validSupportOrders, cutSupportOrderIds, previousState, variant);
+  const baseConvoyContext: ConvoyContext = { convoyOrders, disruptedFleetIds: new Set() };
+  const ownConvoySupportCutOrderIds = findOwnConvoySupportCutOrderIds(moveOrders, validSupportOrders, previousState, baseConvoyContext, variant);
+  let convoyContext = baseConvoyContext;
+  let paradoxicalConvoyMoveIds = findParadoxicalConvoyMoveIds(moveOrders, validSupportOrders, previousState, baseConvoyContext, variant);
+  let activeMoveOrders = findActiveMoveOrders(moveOrders, previousState, convoyContext, variant).filter((move) => !paradoxicalConvoyMoveIds.has(move.unit.id));
+  let cutSupportOrderIds = findCutSupports(validSupportOrders, activeMoveOrders, previousState, convoyContext, variant);
+  cutSupportOrderIds = new Set([...cutSupportOrderIds, ...ownConvoySupportCutOrderIds]);
+  let attacks = buildAttacks(activeMoveOrders, validSupportOrders, cutSupportOrderIds, previousState, convoyContext, variant);
   let defenseStrengthByUnitId = calculateDefenseStrengths(previousState, moveOrders, validSupportOrders, cutSupportOrderIds);
   let resolvedMoves = resolveMoves(attacks, previousState, defenseStrengthByUnitId, variant);
+  const disruptedFleetIds = new Set(resolvedMoves.dislodgements.map((dislodgement) => dislodgement.unit.id));
+
+  if (disruptedFleetIds.size > 0) {
+    convoyContext = { convoyOrders, disruptedFleetIds };
+    paradoxicalConvoyMoveIds = findParadoxicalConvoyMoveIds(moveOrders, validSupportOrders, previousState, baseConvoyContext, variant);
+    activeMoveOrders = findActiveMoveOrders(moveOrders, previousState, convoyContext, variant).filter((move) => !paradoxicalConvoyMoveIds.has(move.unit.id));
+    cutSupportOrderIds = findCutSupports(validSupportOrders, activeMoveOrders, previousState, convoyContext, variant);
+    cutSupportOrderIds = new Set([...cutSupportOrderIds, ...ownConvoySupportCutOrderIds]);
+    attacks = buildAttacks(activeMoveOrders, validSupportOrders, cutSupportOrderIds, previousState, convoyContext, variant);
+    defenseStrengthByUnitId = calculateDefenseStrengths(previousState, moveOrders, validSupportOrders, cutSupportOrderIds);
+    resolvedMoves = resolveMoves(attacks, previousState, defenseStrengthByUnitId, variant);
+  }
   const dislodgedSupportOrderIds = findDislodgedSupportOrderIds(validSupportOrders, resolvedMoves.dislodgements);
 
   if ([...dislodgedSupportOrderIds].some((orderId) => !cutSupportOrderIds.has(orderId))) {
     cutSupportOrderIds = new Set([...cutSupportOrderIds, ...dislodgedSupportOrderIds]);
-    attacks = buildAttacks(moveOrders, validSupportOrders, cutSupportOrderIds, previousState, variant);
+    paradoxicalConvoyMoveIds = findParadoxicalConvoyMoveIds(moveOrders, validSupportOrders, previousState, baseConvoyContext, variant);
+    activeMoveOrders = findActiveMoveOrders(moveOrders, previousState, convoyContext, variant).filter((move) => !paradoxicalConvoyMoveIds.has(move.unit.id));
+    attacks = buildAttacks(activeMoveOrders, validSupportOrders, cutSupportOrderIds, previousState, convoyContext, variant);
     defenseStrengthByUnitId = calculateDefenseStrengths(previousState, moveOrders, validSupportOrders, cutSupportOrderIds);
     resolvedMoves = resolveMoves(attacks, previousState, defenseStrengthByUnitId, variant);
   }
@@ -157,6 +187,12 @@ function adjudicateMovement(
         status: cutSupportOrderIds.has(item.order.id) ? "fails" : "succeeds",
         reason: cutSupportOrderIds.has(item.order.id) ? "Support was cut by an attack from another province." : "Support was not cut.",
       };
+    } else if (item.order.type === "convoy") {
+      orderResults[item.order.id] = {
+        order: item.order,
+        status: convoyContext.disruptedFleetIds.has(item.unit.id) ? "fails" : "succeeds",
+        reason: convoyContext.disruptedFleetIds.has(item.unit.id) ? "Convoying fleet was dislodged." : "Convoy order was not disrupted.",
+      };
     } else {
       orderResults[item.order.id] = {
         order: item.order,
@@ -181,7 +217,13 @@ function adjudicateMovement(
   };
 }
 
-function validateOrder(order: Order, unit: Unit, state: GameState, variant: VariantDefinition): string | undefined {
+function validateOrder(
+  order: Order,
+  unit: Unit,
+  state: GameState,
+  submittedOrders: readonly Order[],
+  variant: VariantDefinition,
+): string | undefined {
   if (order.type === "hold") {
     return undefined;
   }
@@ -191,7 +233,15 @@ function validateOrder(order: Order, unit: Unit, state: GameState, variant: Vari
       return "Move destination cannot be occupied by that unit type.";
     }
 
-    return areAdjacent(unit.type, unit.location, order.to, variant) ? undefined : "Move destination is not adjacent to the unit location.";
+    if (areAdjacent(unit.type, unit.location, order.to, variant) && !order.viaConvoy) {
+      return undefined;
+    }
+
+    if (isConvoyableMove(unit, order.to, variant) && hasPotentialConvoyRoute(unit, order.to, state, variant)) {
+      return undefined;
+    }
+
+    return "Move destination is not adjacent to the unit location.";
   }
 
   if (order.type === "retreat" || order.type === "disband") {
@@ -200,6 +250,35 @@ function validateOrder(order: Order, unit: Unit, state: GameState, variant: Vari
 
   if (order.type === "build") {
     return "Build orders are only valid during build phases.";
+  }
+
+  if (order.type === "convoy") {
+    if (unit.type !== "fleet") {
+      return "Only fleets may convoy.";
+    }
+
+    if (locationDefinition(unit.location, variant)?.type !== "sea") {
+      return "Only fleets in sea locations may convoy.";
+    }
+
+    const convoyedUnit = state.units.find((candidate) => candidate.id === order.convoyedUnitId);
+    if (!convoyedUnit) {
+      return "Convoy references a unit that is not in the current state.";
+    }
+
+    if (!isConvoyableMove(convoyedUnit, order.to, variant)) {
+      return "Convoyed move is not a valid army convoy move.";
+    }
+
+    if (
+      !submittedOrders.some((submittedOrder) => {
+        return submittedOrder.type === "move" && submittedOrder.unitId === order.convoyedUnitId && submittedOrder.to === order.to;
+      })
+    ) {
+      return "Convoy does not match a submitted move order.";
+    }
+
+    return undefined;
   }
 
   const supportedUnit = state.units.find((candidate) => candidate.id === order.supportedUnitId);
@@ -218,6 +297,19 @@ function validateOrder(order: Order, unit: Unit, state: GameState, variant: Vari
 
   if (order.to && locationProvince(supportedUnit.location, variant) === locationProvince(order.to, variant)) {
     return "A unit cannot support movement to the province it already occupies.";
+  }
+
+  if (
+    order.to &&
+    supportedUnit.type === "army" &&
+    !areAdjacent("army", supportedUnit.location, order.to, variant) &&
+    unit.type === "fleet" &&
+    locationDefinition(unit.location, variant)?.type === "sea" &&
+    canFleetReachProvince(unit.location, locationProvince(supportedUnit.location, variant), variant) &&
+    canFleetReachProvince(unit.location, locationProvince(order.to, variant), variant) &&
+    !hasPotentialConvoyRoute(supportedUnit, order.to, state, variant, unit.location)
+  ) {
+    return "A fleet cannot both convoy and support the same army move.";
   }
 
   return undefined;
@@ -247,17 +339,192 @@ function buildAttacks(
   supportOrders: readonly (NormalizedOrder & { order: SupportOrder })[],
   cutSupportOrderIds: ReadonlySet<OrderId>,
   state: GameState,
+  convoyContext: ConvoyContext,
   variant: VariantDefinition,
 ): readonly Attack[] {
-  return moveOrders.map((item) => ({
-    order: item.order,
-    unit: item.unit,
-    from: item.unit.location,
-    fromProvince: locationProvince(item.unit.location, variant),
-    to: item.order.to,
-    toProvince: locationProvince(item.order.to, variant),
-    strength: 1 + countValidSupports(item.order, item.unit, supportOrders, cutSupportOrderIds, state, variant),
-  }));
+  return moveOrders.map((item) => {
+    const supportPowerCounts = countSupportPowers(item.order, item.unit, supportOrders, cutSupportOrderIds, state, variant);
+    return {
+      order: item.order,
+      unit: item.unit,
+      from: item.unit.location,
+      fromProvince: locationProvince(item.unit.location, variant),
+      to: item.order.to,
+      toProvince: locationProvince(item.order.to, variant),
+      strength: 1 + [...supportPowerCounts.values()].reduce((total, count) => total + count, 0),
+      supportPowerCounts,
+      viaConvoy: isMoveViaConvoy(item, state, convoyContext, variant),
+    };
+  });
+}
+
+function findActiveMoveOrders(
+  moveOrders: readonly (NormalizedOrder & { order: MoveOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): readonly (NormalizedOrder & { order: MoveOrder })[] {
+  return moveOrders.filter((move) => {
+    if (!isMoveIntendedViaConvoy(move, convoyContext, variant)) {
+      return true;
+    }
+
+    return hasConvoyRoute(move.unit, move.order.to, state, convoyContext, variant);
+  });
+}
+
+function isMoveViaConvoy(
+  move: NormalizedOrder & { order: MoveOrder },
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  return isMoveIntendedViaConvoy(move, convoyContext, variant) && hasConvoyRoute(move.unit, move.order.to, state, convoyContext, variant);
+}
+
+function isMoveIntendedViaConvoy(
+  move: NormalizedOrder & { order: MoveOrder },
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  return (
+    isConvoyableMove(move.unit, move.order.to, variant) &&
+    (move.order.viaConvoy ||
+      !areAdjacent(move.unit.type, move.unit.location, move.order.to, variant) ||
+      hasOwnConvoyIntent(move, convoyContext, variant))
+  );
+}
+
+function hasOwnConvoyIntent(
+  move: NormalizedOrder & { order: MoveOrder },
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  const hasSingleForeignFleetRoute = convoyContext.convoyOrders.some((convoy) => {
+    return (
+      convoy.unit.power !== move.unit.power &&
+      convoy.order.convoyedUnitId === move.unit.id &&
+      convoy.order.to === move.order.to &&
+      canSingleFleetConvoy(move.unit, move.order.to, convoy.unit.location, variant)
+    );
+  });
+
+  return convoyContext.convoyOrders.some((convoy) => {
+    if (convoy.unit.power !== move.unit.power || convoy.order.convoyedUnitId !== move.unit.id || convoy.order.to !== move.order.to) {
+      return false;
+    }
+
+    return canSingleFleetConvoy(move.unit, move.order.to, convoy.unit.location, variant) || !hasSingleForeignFleetRoute;
+  });
+}
+
+function canSingleFleetConvoy(unit: Unit, to: LocationId, fleetLocation: LocationId, variant: VariantDefinition): boolean {
+  return canFleetReachProvince(fleetLocation, locationProvince(unit.location, variant), variant) && canFleetReachProvince(fleetLocation, locationProvince(to, variant), variant);
+}
+
+function hasConvoyRoute(
+  unit: Unit,
+  to: LocationId,
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  if (!isConvoyableMove(unit, to, variant)) {
+    return false;
+  }
+
+  const convoyFleetLocations = new Set<LocationId>();
+  for (const convoy of convoyContext.convoyOrders) {
+    if (convoy.order.convoyedUnitId !== unit.id || convoy.order.to !== to || convoyContext.disruptedFleetIds.has(convoy.unit.id)) {
+      continue;
+    }
+
+    convoyFleetLocations.add(convoy.unit.location);
+  }
+
+  if (convoyFleetLocations.size === 0) {
+    return false;
+  }
+
+  const startProvince = locationProvince(unit.location, variant);
+  const destinationProvince = locationProvince(to, variant);
+  const queue = [...convoyFleetLocations].filter((location) => canFleetReachProvince(location, startProvince, variant));
+  const visited = new Set<LocationId>(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const fleetLocation = queue[index];
+    if (canFleetReachProvince(fleetLocation, destinationProvince, variant)) {
+      return true;
+    }
+
+    for (const next of adjacentLocations("fleet", fleetLocation, variant)) {
+      if (!convoyFleetLocations.has(next) || visited.has(next)) {
+        continue;
+      }
+
+      visited.add(next);
+      queue.push(next);
+    }
+  }
+
+  return false;
+}
+
+function isNecessaryConvoyFleet(
+  unit: Unit,
+  to: LocationId,
+  fleetId: UnitId,
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  return (
+    hasConvoyRoute(unit, to, state, convoyContext, variant) &&
+    !hasConvoyRoute(unit, to, state, { ...convoyContext, disruptedFleetIds: new Set([...convoyContext.disruptedFleetIds, fleetId]) }, variant)
+  );
+}
+
+function hasPotentialConvoyRoute(
+  unit: Unit,
+  to: LocationId,
+  state: GameState,
+  variant: VariantDefinition,
+  excludedFleetLocation?: LocationId,
+): boolean {
+  if (!isConvoyableMove(unit, to, variant)) {
+    return false;
+  }
+
+  const fleetLocations = new Set(
+    state.units
+      .filter((candidate) => candidate.type === "fleet")
+      .map((fleet) => fleet.location),
+  );
+  if (excludedFleetLocation) {
+    fleetLocations.delete(excludedFleetLocation);
+  }
+  const startProvince = locationProvince(unit.location, variant);
+  const destinationProvince = locationProvince(to, variant);
+  const queue = [...fleetLocations].filter((location) => canFleetReachProvince(location, startProvince, variant));
+  const visited = new Set<LocationId>(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const fleetLocation = queue[index];
+    if (canFleetReachProvince(fleetLocation, destinationProvince, variant)) {
+      return true;
+    }
+
+    for (const next of adjacentLocations("fleet", fleetLocation, variant)) {
+      if (!fleetLocations.has(next) || visited.has(next)) {
+        continue;
+      }
+
+      visited.add(next);
+      queue.push(next);
+    }
+  }
+
+  return false;
 }
 
 function findDislodgedSupportOrderIds(
@@ -490,10 +757,13 @@ function adjudicateBuilds(
 
       const missingDisbands = requiredDisbands - disbandedUnitIds.size;
       if (missingDisbands > 0) {
-        const forcedDisbands = nextUnits
-          .filter((unit) => unit.power === power.id && !disbandedUnitIds.has(unit.id))
-          .sort((left, right) => left.id.localeCompare(right.id))
-          .slice(0, missingDisbands);
+        const forcedDisbands = chooseCivilDisorderDisbands(
+          nextUnits.filter((unit) => unit.power === power.id && !disbandedUnitIds.has(unit.id)),
+          previousState,
+          power.id,
+          missingDisbands,
+          variant,
+        );
 
         for (const unit of forcedDisbands) {
           const order: DisbandOrder = {
@@ -614,6 +884,102 @@ function removeUnits(units: Unit[], unitIds: ReadonlySet<Unit["id"]>) {
   }
 }
 
+function chooseCivilDisorderDisbands(
+  units: readonly Unit[],
+  state: GameState,
+  power: PowerId,
+  count: number,
+  variant: VariantDefinition,
+): readonly Unit[] {
+  const ownedSupplyCenters = new Set(
+    variant.provinces
+      .filter((province) => province.supplyCenter && state.supplyCenterOwners[province.id] === power)
+      .map((province) => province.id),
+  );
+  const provinceGraph = buildProvinceGraph(variant);
+
+  return [...units]
+    .sort((left, right) => {
+      const distanceComparison =
+        civilDisorderDistance(right, ownedSupplyCenters, provinceGraph, variant) -
+        civilDisorderDistance(left, ownedSupplyCenters, provinceGraph, variant);
+      if (distanceComparison !== 0) {
+        return distanceComparison;
+      }
+
+      if (left.type !== right.type) {
+        return left.type === "fleet" ? -1 : 1;
+      }
+
+      const provinceNameComparison = provinceName(left.location, variant).localeCompare(provinceName(right.location, variant));
+      return provinceNameComparison !== 0 ? provinceNameComparison : left.id.localeCompare(right.id);
+    })
+    .slice(0, count);
+}
+
+function civilDisorderDistance(
+  unit: Unit,
+  ownedSupplyCenters: ReadonlySet<ProvinceId>,
+  provinceGraph: ReadonlyMap<ProvinceId, ReadonlySet<ProvinceId>>,
+  variant: VariantDefinition,
+): number {
+  const start = locationProvince(unit.location, variant);
+  if (ownedSupplyCenters.has(start)) {
+    return 0;
+  }
+
+  const queue: { readonly province: ProvinceId; readonly distance: number }[] = [{ province: start, distance: 0 }];
+  const visited = new Set<ProvinceId>([start]);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    for (const next of provinceGraph.get(current.province) ?? []) {
+      if (visited.has(next)) {
+        continue;
+      }
+
+      const distance = current.distance + 1;
+      if (ownedSupplyCenters.has(next)) {
+        return distance;
+      }
+
+      visited.add(next);
+      queue.push({ province: next, distance });
+    }
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+function buildProvinceGraph(variant: VariantDefinition): ReadonlyMap<ProvinceId, ReadonlySet<ProvinceId>> {
+  const graph = new Map<ProvinceId, Set<ProvinceId>>();
+
+  for (const location of variant.locations) {
+    const fromProvince = location.province;
+    const neighbors = graph.get(fromProvince) ?? new Set<ProvinceId>();
+    graph.set(fromProvince, neighbors);
+
+    for (const adjacency of variant.adjacency[location.id] ?? []) {
+      const toProvince = locationProvince(adjacency.to, variant);
+      if (toProvince === fromProvince) {
+        continue;
+      }
+
+      neighbors.add(toProvince);
+      const reverseNeighbors = graph.get(toProvince) ?? new Set<ProvinceId>();
+      reverseNeighbors.add(fromProvince);
+      graph.set(toProvince, reverseNeighbors);
+    }
+  }
+
+  return graph;
+}
+
+function provinceName(location: LocationId, variant: VariantDefinition): string {
+  const province = locationProvince(location, variant);
+  return variant.provinces.find((candidate) => candidate.id === province)?.name ?? province;
+}
+
 function updateSupplyCenterOwnersAfterPhase(
   state: GameState,
   units: readonly Unit[],
@@ -661,13 +1027,15 @@ function findContestedRetreatProvinces(
 function findCutSupports(
   supports: readonly (NormalizedOrder & { order: SupportOrder })[],
   moves: readonly (NormalizedOrder & { order: MoveOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
   variant: VariantDefinition,
 ): Set<OrderId> {
   const cutSupportOrderIds = new Set<OrderId>();
 
   for (const support of supports) {
     for (const move of moves) {
-      if (move.unit.power === support.unit.power) {
+      if (move.unit.power === support.unit.power && !isMoveViaConvoy(move, state, convoyContext, variant)) {
         continue;
       }
 
@@ -680,6 +1048,10 @@ function findCutSupports(
         continue;
       }
 
+      if (isParadoxicalConvoySupportCut(move, support, supports, state, convoyContext, variant)) {
+        continue;
+      }
+
       cutSupportOrderIds.add(support.order.id);
     }
   }
@@ -687,31 +1059,179 @@ function findCutSupports(
   return cutSupportOrderIds;
 }
 
-function countValidSupports(
+function findOwnConvoySupportCutOrderIds(
+  moves: readonly (NormalizedOrder & { order: MoveOrder })[],
+  supports: readonly (NormalizedOrder & { order: SupportOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): ReadonlySet<OrderId> {
+  const cutSupportOrderIds = new Set<OrderId>();
+
+  for (const move of moves) {
+    if (!isMoveIntendedViaConvoy(move, convoyContext, variant)) {
+      continue;
+    }
+
+    for (const support of supports) {
+      if (move.unit.power !== support.unit.power) {
+        continue;
+      }
+
+      if (locationProvince(move.order.to, variant) !== locationProvince(support.unit.location, variant)) {
+        continue;
+      }
+
+      const supportedUnit = state.units.find((candidate) => candidate.id === support.order.supportedUnitId);
+      const supportTarget = support.order.to ?? supportedUnit?.location;
+      if (supportTarget && locationProvince(move.unit.location, variant) === locationProvince(supportTarget, variant)) {
+        continue;
+      }
+
+      cutSupportOrderIds.add(support.order.id);
+    }
+  }
+
+  return cutSupportOrderIds;
+}
+
+function isParadoxicalConvoySupportCut(
+  move: NormalizedOrder & { order: MoveOrder },
+  support: NormalizedOrder & { order: SupportOrder },
+  supports: readonly (NormalizedOrder & { order: SupportOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  if (!isMoveViaConvoy(move, state, convoyContext, variant)) {
+    return false;
+  }
+
+  if (move.unit.power === support.unit.power) {
+    return false;
+  }
+
+  const supportedUnit = state.units.find((candidate) => candidate.id === support.order.supportedUnitId);
+  if (!supportedUnit) {
+    return false;
+  }
+
+  const supportTarget = support.order.to ?? supportedUnit.location;
+  const supportTargetProvince = locationProvince(supportTarget, variant);
+  const necessaryConvoyFleet = convoyContext.convoyOrders.find((convoy) => {
+    const convoyedMove = state.units.find((unit) => unit.id === convoy.order.convoyedUnitId);
+    if (
+      !convoyedMove ||
+      locationProvince(convoy.unit.location, variant) !== supportTargetProvince ||
+      !isNecessaryConvoyFleet(convoyedMove, convoy.order.to, convoy.unit.id, state, convoyContext, variant)
+    ) {
+      return false;
+    }
+
+    if (convoyedMove.id === move.unit.id && convoy.order.to === move.order.to) {
+      return true;
+    }
+
+    return hasReciprocalConvoyDependency(move, convoyedMove, convoy.order.to, supports, state, convoyContext, variant);
+  });
+
+  return Boolean(necessaryConvoyFleet);
+}
+
+function hasReciprocalConvoyDependency(
+  move: NormalizedOrder & { order: MoveOrder },
+  protectedConvoyedUnit: Unit,
+  protectedConvoyDestination: LocationId,
+  supports: readonly (NormalizedOrder & { order: SupportOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): boolean {
+  const protectedMove = { unit: protectedConvoyedUnit, order: { id: "dependency" as OrderId, type: "move" as const, unitId: protectedConvoyedUnit.id, to: protectedConvoyDestination } };
+  const moveConvoyFleetProvinces = new Set(
+    convoyContext.convoyOrders
+      .filter((convoy) => {
+        return (
+          convoy.order.convoyedUnitId === move.unit.id &&
+          convoy.order.to === move.order.to &&
+          isNecessaryConvoyFleet(move.unit, move.order.to, convoy.unit.id, state, convoyContext, variant)
+        );
+      })
+      .map((convoy) => locationProvince(convoy.unit.location, variant)),
+  );
+
+  if (moveConvoyFleetProvinces.size === 0) {
+    return false;
+  }
+
+  return supports.some((support) => {
+    const supportedUnit = state.units.find((candidate) => candidate.id === support.order.supportedUnitId);
+    const supportTarget = support.order.to ?? supportedUnit?.location;
+    return (
+      locationProvince(protectedMove.order.to, variant) === locationProvince(support.unit.location, variant) &&
+      supportTarget !== undefined &&
+      moveConvoyFleetProvinces.has(locationProvince(supportTarget, variant))
+    );
+  });
+}
+
+function findParadoxicalConvoyMoveIds(
+  moves: readonly (NormalizedOrder & { order: MoveOrder })[],
+  supports: readonly (NormalizedOrder & { order: SupportOrder })[],
+  state: GameState,
+  convoyContext: ConvoyContext,
+  variant: VariantDefinition,
+): ReadonlySet<UnitId> {
+  const paradoxicalMoveIds = new Set<UnitId>();
+
+  for (const move of moves) {
+    if (!isMoveViaConvoy(move, state, convoyContext, variant)) {
+      continue;
+    }
+
+    for (const support of supports) {
+      if (locationProvince(move.order.to, variant) !== locationProvince(support.unit.location, variant)) {
+        continue;
+      }
+
+      if (isParadoxicalConvoySupportCut(move, support, supports, state, convoyContext, variant)) {
+        paradoxicalMoveIds.add(move.unit.id);
+      }
+    }
+  }
+
+  return paradoxicalMoveIds;
+}
+
+function countSupportPowers(
   moveOrder: MoveOrder,
   movingUnit: Unit,
   supports: readonly (NormalizedOrder & { order: SupportOrder })[],
   cutSupportOrderIds: ReadonlySet<OrderId>,
   state: GameState,
   variant: VariantDefinition,
-): number {
-  return supports.filter((support) => {
+): ReadonlyMap<PowerId, number> {
+  const supportPowerCounts = new Map<PowerId, number>();
+
+  for (const support of supports) {
     if (cutSupportOrderIds.has(support.order.id)) {
-      return false;
+      continue;
     }
 
     if (support.order.supportedUnitId !== movingUnit.id || support.order.to !== moveOrder.to) {
-      return false;
+      continue;
     }
 
     const targetProvince = locationProvince(moveOrder.to, variant);
     const targetOccupant = state.units.find((unit) => locationProvince(unit.location, variant) === targetProvince);
-    if (!targetOccupant) {
-      return true;
+    if (targetOccupant?.power === movingUnit.power) {
+      continue;
     }
 
-    return targetOccupant.power !== movingUnit.power && targetOccupant.power !== support.unit.power;
-  }).length;
+    supportPowerCounts.set(support.unit.power, (supportPowerCounts.get(support.unit.power) ?? 0) + 1);
+  }
+
+  return supportPowerCounts;
 }
 
 function calculateDefenseStrengths(
@@ -771,7 +1291,7 @@ function resolveMoves(
       dislodgements.push({
         unit: occupant,
         attacker: attack.unit,
-        from: attack.from,
+        from: attack.viaConvoy ? attack.to : attack.from,
       });
     }
   }
@@ -795,8 +1315,8 @@ function doesAttackSucceed(
   }
 
   const occupantAttack = context.attacksByUnitId.get(occupant.id);
-  if (occupantAttack?.to === attack.from) {
-    return attack.strength > occupantAttack.strength;
+  if (occupantAttack?.to === attack.from && !attack.viaConvoy && !occupantAttack.viaConvoy) {
+    return canDislodge(attack, occupant, destinationAttacks) && dislodgementStrength(attack, occupant) > occupantAttack.strength;
   }
 
   if (occupant.power === attack.unit.power) {
@@ -807,7 +1327,16 @@ function doesAttackSucceed(
     return true;
   }
 
-  return attack.strength > (context.defenseStrengthByUnitId.get(occupant.id) ?? 1);
+  return canDislodge(attack, occupant, destinationAttacks) && dislodgementStrength(attack, occupant) > (context.defenseStrengthByUnitId.get(occupant.id) ?? 1);
+}
+
+function dislodgementStrength(attack: Attack, defender: Unit): number {
+  return attack.strength - (attack.supportPowerCounts.get(defender.power) ?? 0);
+}
+
+function canDislodge(attack: Attack, defender: Unit, destinationAttacks: readonly Attack[]): boolean {
+  const strength = dislodgementStrength(attack, defender);
+  return destinationAttacks.every((candidate) => candidate === attack || strength > candidate.strength);
 }
 
 function doesAttackVacate(
@@ -906,6 +1435,26 @@ function areAdjacent(unitType: Unit["type"], from: LocationId, to: LocationId, v
   return variant.adjacency[from]?.some((adjacency) => adjacency.to === to && adjacency.unitTypes.includes(unitType)) ?? false;
 }
 
+function isConvoyableMove(unit: Unit, to: LocationId, variant: VariantDefinition): boolean {
+  if (unit.type !== "army") {
+    return false;
+  }
+
+  const fromProvinceId = locationProvince(unit.location, variant);
+  const toProvinceId = locationProvince(to, variant);
+  if (fromProvinceId === toProvinceId) {
+    return false;
+  }
+
+  const fromProvince = variant.provinces.find((province) => province.id === fromProvinceId);
+  const toProvince = variant.provinces.find((province) => province.id === toProvinceId);
+  return fromProvince?.type === "coastal" && toProvince?.type === "coastal";
+}
+
+function canFleetReachProvince(from: LocationId, province: ProvinceId, variant: VariantDefinition): boolean {
+  return adjacentLocations("fleet", from, variant).some((location) => locationProvince(location, variant) === province);
+}
+
 function canSupportProvince(unitType: Unit["type"], from: LocationId, target: LocationId, variant: VariantDefinition): boolean {
   const targetProvince = locationProvince(target, variant);
   return adjacentLocations(unitType, from, variant).some((location) => locationProvince(location, variant) === targetProvince);
@@ -916,12 +1465,15 @@ function adjacentLocations(unitType: Unit["type"], from: LocationId, variant: Va
 }
 
 function canUnitOccupy(unitType: Unit["type"], locationId: LocationId, variant: VariantDefinition): boolean {
-  const location = variant.locations.find((candidate) => candidate.id === locationId);
-  return location?.unitTypes.includes(unitType) ?? false;
+  return locationDefinition(locationId, variant)?.unitTypes.includes(unitType) ?? false;
+}
+
+function locationDefinition(locationId: LocationId, variant: VariantDefinition) {
+  return variant.locations.find((candidate) => candidate.id === locationId);
 }
 
 function locationProvince(locationId: LocationId, variant: VariantDefinition): ProvinceId {
-  const location = variant.locations.find((candidate) => candidate.id === locationId);
+  const location = locationDefinition(locationId, variant);
   if (!location) {
     throw new Error(`Unknown location ${locationId}.`);
   }

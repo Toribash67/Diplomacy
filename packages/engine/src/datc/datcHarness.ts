@@ -48,6 +48,7 @@ const explicitLocationAliases: Readonly<Record<string, LocationId>> = {
   [normalizeName("Gulf of Lyon")]: locationId("lyo"),
   [normalizeName("Helgoland Bight")]: locationId("hel"),
   [normalizeName("Ionian Sea")]: locationId("ion"),
+  [normalizeName("Rhur")]: locationId("ruh"),
   [normalizeName("Irish Sea")]: locationId("iri"),
   [normalizeName("Mid-Atlantic Ocean")]: locationId("mao"),
   [normalizeName("North Africa")]: locationId("naf"),
@@ -81,19 +82,17 @@ export function parseDatcMovementScenario(orderBlock: string): DatcMovementScena
   const parsedLines = parseOrderLines(orderBlock);
 
   for (const { line, power } of parsedLines) {
-    if (line.includes(" Convoys ")) {
-      continue;
-    }
-
     const parsed = parseUnitPrefix(line);
     ensureUnit(units, power, parsed.type, parsed.location, true);
+
+    if (parsed.remainder.startsWith("Convoys ")) {
+      const convoyed = parseSupportedUnitPrefix(parsed.remainder.slice("Convoys ".length), units);
+      const convoyedPower = findPowerAtLocation(units, convoyed.type, convoyed.location) ?? power;
+      ensureUnit(units, convoyedPower, convoyed.type, convoyed.location);
+    }
   }
 
   for (const { line, power } of parsedLines) {
-    if (line.includes(" Convoys ")) {
-      continue;
-    }
-
     const parsed = parseUnitPrefix(line);
     const orderingUnit = ensureUnit(units, power, parsed.type, parsed.location, true);
     const orderingUnitId = orderingUnit.id;
@@ -105,7 +104,7 @@ export function parseDatcMovementScenario(orderBlock: string): DatcMovementScena
     }
 
     if (parsed.remainder.startsWith("Supports ")) {
-      const supported = parseUnitPrefix(parsed.remainder.slice("Supports ".length));
+      const supported = parseSupportedUnitPrefix(parsed.remainder.slice("Supports ".length), units);
       const supportedPower = findPowerAtLocation(units, supported.type, supported.location) ?? power;
       const supportedUnit = ensureUnit(units, supportedPower, supported.type, supported.location);
 
@@ -115,7 +114,7 @@ export function parseDatcMovementScenario(orderBlock: string): DatcMovementScena
           type: "support",
           unitId: orderingUnitId,
           supportedUnitId: supportedUnit.id,
-          to: parseMoveDestination(supported.type, supported.location, supported.remainder.slice(2)),
+          to: parseMoveDestination(supported.type, supported.location, stripViaConvoy(supported.remainder.slice(2))),
         });
         continue;
       }
@@ -129,12 +128,31 @@ export function parseDatcMovementScenario(orderBlock: string): DatcMovementScena
       continue;
     }
 
+    if (parsed.remainder.startsWith("Convoys ")) {
+      const convoyed = parseSupportedUnitPrefix(parsed.remainder.slice("Convoys ".length), units);
+      const convoyedPower = findPowerAtLocation(units, convoyed.type, convoyed.location) ?? power;
+      const convoyedUnit = ensureUnit(units, convoyedPower, convoyed.type, convoyed.location);
+      if (!convoyed.remainder.startsWith("- ")) {
+        throw new Error(`Unsupported DATC convoy order line: ${line}`);
+      }
+
+      orders.push({
+        id: orderId(orderBase),
+        type: "convoy",
+        unitId: orderingUnitId,
+        convoyedUnitId: convoyedUnit.id,
+        to: parseMoveDestination(convoyed.type, convoyed.location, stripViaConvoy(convoyed.remainder.slice(2))),
+      });
+      continue;
+    }
+
     if (parsed.remainder.startsWith("- ")) {
       orders.push({
         id: orderId(orderBase),
         type: "move",
         unitId: orderingUnitId,
-        to: parseMoveDestination(parsed.type, parsed.location, parsed.remainder.slice(2)),
+        to: parseMoveDestination(parsed.type, parsed.location, stripViaConvoy(parsed.remainder.slice(2))),
+        viaConvoy: /\bvia convoy$/i.test(parsed.remainder),
       });
       continue;
     }
@@ -227,8 +245,12 @@ function parsePowerHeader(line: string): PowerId | undefined {
   return power?.id;
 }
 
+function stripViaConvoy(destination: string): string {
+  return destination.replace(/\s+via convoy$/i, "");
+}
+
 function parseUnitPrefix(line: string): { readonly type: UnitType; readonly location: LocationId; readonly remainder: string } {
-  const match = /^(A|F) (.+?)(?: (Hold|Supports .+|- .+))?$/.exec(line);
+  const match = /^(A|F) (.+?)(?: (Hold|Supports .+|Convoys .+|- .+))?$/.exec(line);
   if (!match) {
     throw new Error(`Could not parse DATC unit order: ${line}`);
   }
@@ -238,6 +260,32 @@ function parseUnitPrefix(line: string): { readonly type: UnitType; readonly loca
     location: parseLocation(match[2]),
     remainder: match[3] ?? "Hold",
   };
+}
+
+function parseSupportedUnitPrefix(
+  line: string,
+  units: ReadonlyMap<string, Unit>,
+): { readonly type: UnitType; readonly location: LocationId; readonly remainder: string } {
+  try {
+    return parseUnitPrefix(line);
+  } catch (error) {
+    const match = /^(.+?)( - .+)?$/.exec(line);
+    if (!match) {
+      throw error;
+    }
+
+    const location = parseLocation(match[1]);
+    const unit = [...units.values()].find((candidate) => candidate.location === location);
+    if (!unit) {
+      throw error;
+    }
+
+    return {
+      type: unit.type,
+      location,
+      remainder: match[2]?.trimStart() ?? "Hold",
+    };
+  }
 }
 
 function ensureUnit(

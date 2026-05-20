@@ -212,7 +212,7 @@ describe("adjudicate", () => {
     assert.equal(result.orderResults[orderId("red-disband")].status, "succeeds");
   });
 
-  it("automatically disbands missing required disbands", () => {
+  it("automatically disbands missing required disbands by civil disorder distance", () => {
     const buildState = createBuildState({
       units: [
         { id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.alpha },
@@ -224,9 +224,9 @@ describe("adjudicate", () => {
 
     const result = adjudicate(buildState, [], testVariant);
 
-    assert.equal(hasUnit(result.nextState, testUnits.redArmy), false);
-    assert.equal(hasUnit(result.nextState, unitId("red-2")), true);
-    assert.equal(result.orderResults[orderId(`forced-disband:${testUnits.redArmy}`)].status, "succeeds");
+    assert.equal(hasUnit(result.nextState, testUnits.redArmy), true);
+    assert.equal(hasUnit(result.nextState, unitId("red-2")), false);
+    assert.equal(result.orderResults[orderId("forced-disband:red-2")].status, "succeeds");
   });
 
   it("cuts support when the supporter is attacked from another province", () => {
