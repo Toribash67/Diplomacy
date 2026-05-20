@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { adjudicate } from "./adjudicate.js";
 import { locationId, orderId, provinceId, unitId, type GameState, type PendingRetreat, type Unit, type VariantDefinition } from "./types.js";
-import { testLocations, testUnits, testVariant } from "./variants/testVariant.js";
+import { testLocations, testPowers, testProvinces, testUnits, testVariant } from "./variants/testVariant.js";
 
 describe("adjudicate", () => {
   it("bounces equally strong attacks into the same province", () => {
@@ -56,6 +56,177 @@ describe("adjudicate", () => {
 
     assert.deepEqual(result.nextState.phase, { year: 1901, season: "fall", type: "movement" });
     assert.deepEqual(result.retreats, []);
+  });
+
+  it("does not update supply center ownership after spring movement", () => {
+    const result = adjudicate(
+      testVariant.initialState,
+      [
+        { id: orderId("red-move"), type: "move", unitId: testUnits.redArmy, to: testLocations.bravo },
+        { id: orderId("blue-move"), type: "move", unitId: testUnits.blueArmy, to: testLocations.delta },
+      ],
+      testVariant,
+    );
+
+    assert.equal(unitLocation(result.nextState, testUnits.redArmy), testLocations.bravo);
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.bravo], testPowers.blue);
+  });
+
+  it("updates occupied supply center ownership after fall movement", () => {
+    const fallState: GameState = {
+      ...testVariant.initialState,
+      phase: { year: 1901, season: "fall", type: "movement" },
+      units: [
+        { id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.alpha },
+        { id: testUnits.blueArmy, power: testPowers.blue, type: "army", location: testLocations.delta },
+        { id: testUnits.greenArmy, power: testPowers.green, type: "army", location: testLocations.charlie },
+      ],
+    };
+
+    const result = adjudicate(
+      fallState,
+      [{ id: orderId("red-move"), type: "move", unitId: testUnits.redArmy, to: testLocations.bravo }],
+      testVariant,
+    );
+
+    assert.deepEqual(result.nextState.phase, { year: 1901, season: "winter", type: "build" });
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.bravo], testPowers.red);
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.alpha], testPowers.red);
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.delta], undefined);
+  });
+
+  it("updates supply center ownership after fall retreats resolve", () => {
+    const fallRetreatState = createRetreatState(
+      [retreat(testVariant.initialState.units[1], testLocations.alpha, [testLocations.charlie])],
+      { year: 1901, season: "fall", type: "retreat" },
+      [{ id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.bravo }],
+    );
+
+    const result = adjudicate(
+      fallRetreatState,
+      [{ id: orderId("blue-retreat"), type: "retreat", unitId: testUnits.blueArmy, to: testLocations.charlie }],
+      testVariant,
+    );
+
+    assert.deepEqual(result.nextState.phase, { year: 1901, season: "winter", type: "build" });
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.bravo], testPowers.red);
+    assert.equal(result.nextState.supplyCenterOwners[testProvinces.charlie], testPowers.blue);
+  });
+
+  it("builds units in open owned home supply centers", () => {
+    const buildState = createBuildState({
+      supplyCenterOwners: {
+        ...testVariant.initialState.supplyCenterOwners,
+        [testProvinces.bravo]: testPowers.red,
+      },
+      units: [
+        { id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.delta },
+        { id: testUnits.greenArmy, power: testPowers.green, type: "army", location: testLocations.charlie },
+      ],
+    });
+
+    const result = adjudicate(
+      buildState,
+      [
+        {
+          id: orderId("red-build"),
+          type: "build",
+          power: testPowers.red,
+          unitId: unitId("red-2"),
+          unitType: "army",
+          location: testLocations.alpha,
+        },
+      ],
+      testVariant,
+    );
+
+    assert.deepEqual(result.nextState.phase, { year: 1902, season: "spring", type: "movement" });
+    assert.equal(unitLocation(result.nextState, unitId("red-2")), testLocations.alpha);
+    assert.equal(result.orderResults[orderId("red-build")].status, "succeeds");
+  });
+
+  it("rejects builds outside open owned home supply centers", () => {
+    const buildState = createBuildState({
+      supplyCenterOwners: {
+        ...testVariant.initialState.supplyCenterOwners,
+        [testProvinces.bravo]: testPowers.red,
+      },
+      units: [{ id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.delta }],
+    });
+
+    const result = adjudicate(
+      buildState,
+      [
+        {
+          id: orderId("red-build-bravo"),
+          type: "build",
+          power: testPowers.red,
+          unitId: unitId("red-2"),
+          unitType: "army",
+          location: testLocations.bravo,
+        },
+        {
+          id: orderId("red-build-alpha"),
+          type: "build",
+          power: testPowers.red,
+          unitId: unitId("red-3"),
+          unitType: "army",
+          location: testLocations.alpha,
+        },
+      ],
+      testVariant,
+    );
+
+    assert.equal(result.orderResults[orderId("red-build-bravo")].status, "invalid");
+    assert.equal(result.orderResults[orderId("red-build-bravo")].reason, "Build location is not a home supply center for that power.");
+    assert.equal(result.orderResults[orderId("red-build-alpha")].status, "succeeds");
+    assert.equal(hasUnit(result.nextState, unitId("red-2")), false);
+    assert.equal(hasUnit(result.nextState, unitId("red-3")), true);
+  });
+
+  it("disbands ordered units when a power has too few supply centers", () => {
+    const buildState = createBuildState({
+      supplyCenterOwners: {
+        [testProvinces.alpha]: testPowers.red,
+        [testProvinces.bravo]: testPowers.blue,
+        [testProvinces.charlie]: testPowers.green,
+        [testProvinces.delta]: undefined,
+        [testProvinces.echo]: undefined,
+      },
+      units: [
+        { id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.alpha },
+        { id: unitId("red-2"), power: testPowers.red, type: "army", location: testLocations.delta },
+        { id: testUnits.blueArmy, power: testPowers.blue, type: "army", location: testLocations.bravo },
+        { id: testUnits.greenArmy, power: testPowers.green, type: "army", location: testLocations.charlie },
+      ],
+    });
+
+    const result = adjudicate(
+      buildState,
+      [{ id: orderId("red-disband"), type: "disband", unitId: unitId("red-2") }],
+      testVariant,
+    );
+
+    assert.equal(hasUnit(result.nextState, unitId("red-2")), false);
+    assert.equal(hasUnit(result.nextState, testUnits.redArmy), true);
+    assert.equal(result.orderResults[orderId("red-disband")].status, "succeeds");
+  });
+
+  it("automatically disbands missing required disbands", () => {
+    const buildState = createBuildState({
+      units: [
+        { id: testUnits.redArmy, power: testPowers.red, type: "army", location: testLocations.alpha },
+        { id: unitId("red-2"), power: testPowers.red, type: "army", location: testLocations.delta },
+        { id: testUnits.blueArmy, power: testPowers.blue, type: "army", location: testLocations.bravo },
+        { id: testUnits.greenArmy, power: testPowers.green, type: "army", location: testLocations.charlie },
+      ],
+    });
+
+    const result = adjudicate(buildState, [], testVariant);
+
+    assert.equal(hasUnit(result.nextState, testUnits.redArmy), false);
+    assert.equal(hasUnit(result.nextState, unitId("red-2")), true);
+    assert.equal(result.orderResults[orderId(`forced-disband:${testUnits.redArmy}`)].status, "succeeds");
   });
 
   it("cuts support when the supporter is attacked from another province", () => {
@@ -371,13 +542,18 @@ function hasUnit(state: GameState, unitId: string) {
   return state.units.some((candidate) => candidate.id === unitId);
 }
 
-function createRetreatState(retreats: readonly PendingRetreat[]): GameState {
+function createRetreatState(
+  retreats: readonly PendingRetreat[],
+  phase: GameState["phase"] = { year: 1901, season: "spring", type: "retreat" },
+  units?: readonly Unit[],
+): GameState {
   const retreatUnitIds = new Set(retreats.map((pendingRetreat) => pendingRetreat.unit.id));
+  const defaultUnits = testVariant.initialState.units.filter((unit) => !retreatUnitIds.has(unit.id));
 
   return {
     ...testVariant.initialState,
-    phase: { year: 1901, season: "spring", type: "retreat" },
-    units: testVariant.initialState.units.filter((unit) => !retreatUnitIds.has(unit.id)),
+    phase,
+    units: units ?? defaultUnits,
     retreats,
   };
 }
@@ -388,6 +564,16 @@ function retreat(unit: Unit, attackOrigin: Unit["location"], options: readonly U
     from: unit.location,
     attackOrigin,
     options,
+  };
+}
+
+function createBuildState(overrides: Partial<Pick<GameState, "supplyCenterOwners" | "units">> = {}): GameState {
+  return {
+    ...testVariant.initialState,
+    phase: { year: 1901, season: "winter", type: "build" },
+    supplyCenterOwners: overrides.supplyCenterOwners ?? testVariant.initialState.supplyCenterOwners,
+    units: overrides.units ?? testVariant.initialState.units,
+    retreats: [],
   };
 }
 

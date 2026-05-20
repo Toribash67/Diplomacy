@@ -100,6 +100,8 @@ Implemented:
 - disband orders
 - contested retreats
 - phase progression through movement and retreat phases
+- fall supply-center ownership updates
+- build phase adjudication
 
 Known gaps:
 
@@ -107,23 +109,22 @@ Known gaps:
 - convoy disruption
 - convoy paradoxes
 - more DATC-style movement edge cases
-- fall supply-center ownership updates
-- build phase adjudication
 - game-end detection
 
 ## Engine Roadmap
 
 To finish the classic rules engine, work through this order:
 
-1. Fall supply-center ownership
+1. Fall supply-center ownership - done
    - After Fall movement and any Fall retreats, occupied supply centers change owner.
    - Spring movement and Spring retreats must not change ownership.
 
-2. Build phase
+2. Build phase - done
    - Compute each power's unit count versus owned supply centers.
    - Support build orders in open owned home centers.
-   - Support forced and voluntary disbands when a power has too many units.
+   - Support forced and ordered disbands when a power has too many units.
    - Advance Winter to next Spring movement.
+   - Automatic disbands currently use deterministic unit-id order; this is stable but can be replaced by a configurable policy later.
 
 3. Movement correctness hardening
    - Add DATC-style tests for supports, head-to-head moves, beleaguered garrisons, standoffs, and self-dislodgement edge cases.
@@ -155,6 +156,8 @@ Classic 1901 tests cover:
 - representative legal and illegal movement examples
 
 As the rules grow, we should add DATC-style adjudication fixtures. If the engine is ever ported to Rust for bot/search performance, these fixtures should become cross-language conformance tests.
+
+DATC v3.0 Chapter 6 is now imported into `packages/engine/src/datc/datcCases.ts` as repo-owned fixture data. The current Node test suite registers unmapped cases as TODO conformance tests until the raw DATC order text is mapped to typed engine states, orders, and assertions. Sections 6.A and 6.B are executable against the classic map through the DATC harness. Section 6.C is partially executable; the remaining 6.C cases require convoy support.
 
 ## Future Layers
 

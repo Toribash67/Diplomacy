@@ -4,3 +4,4 @@ export * from "./validateVariant.js";
 export * from "./variantBuilder.js";
 export * from "./variants/classic1901.js";
 export * from "./variants/testVariant.js";
+export * from "./datc/datcCases.js";

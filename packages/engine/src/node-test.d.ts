@@ -10,5 +10,8 @@ declare module "node:assert/strict" {
 
 declare module "node:test" {
   export function describe(name: string, fn: () => void): void;
-  export function it(name: string, fn: () => void): void;
+  export const it: {
+    (name: string, fn: () => void): void;
+    todo(name: string): void;
+  };
 }

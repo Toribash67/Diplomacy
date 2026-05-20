@@ -104,7 +104,16 @@ export type DisbandOrder = {
   readonly unitId: UnitId;
 };
 
-export type Order = HoldOrder | MoveOrder | SupportOrder | RetreatOrder | DisbandOrder;
+export type BuildOrder = {
+  readonly id: OrderId;
+  readonly type: "build";
+  readonly power: PowerId;
+  readonly unitId: UnitId;
+  readonly unitType: UnitType;
+  readonly location: LocationId;
+};
+
+export type Order = HoldOrder | MoveOrder | SupportOrder | RetreatOrder | DisbandOrder | BuildOrder;
 
 export type OrderStatus = "succeeds" | "fails" | "invalid";
 
