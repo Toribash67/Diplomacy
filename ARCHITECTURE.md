@@ -111,6 +111,38 @@ Known gaps:
 - build phase adjudication
 - game-end detection
 
+## Engine Roadmap
+
+To finish the classic rules engine, work through this order:
+
+1. Fall supply-center ownership
+   - After Fall movement and any Fall retreats, occupied supply centers change owner.
+   - Spring movement and Spring retreats must not change ownership.
+
+2. Build phase
+   - Compute each power's unit count versus owned supply centers.
+   - Support build orders in open owned home centers.
+   - Support forced and voluntary disbands when a power has too many units.
+   - Advance Winter to next Spring movement.
+
+3. Movement correctness hardening
+   - Add DATC-style tests for supports, head-to-head moves, beleaguered garrisons, standoffs, and self-dislodgement edge cases.
+   - Fix adjudication behavior where those tests expose gaps.
+
+4. Convoys
+   - Add convoy order types and validation.
+   - Support army movement by convoy.
+   - Support convoy disruption.
+   - Add convoy paradox handling after the non-paradox convoy cases are stable.
+
+5. Game-end checks
+   - Detect 18-center solo victory after supply-center ownership updates.
+   - Leave draw voting and concession rules to the later async service layer.
+
+6. API cleanup
+   - Add stable machine-readable result codes alongside human-readable reasons.
+   - Consider phase-specific result types once movement, retreat, and build adjudication are complete.
+
 ## Testing Strategy
 
 Engine behavior is tested with focused unit tests and small artificial variants before using the full classic map. The small `testVariant` keeps adjudication scenarios readable.
