@@ -11,3 +11,11 @@ The first milestone is a variant-capable rules engine. The engine treats a Diplo
 brew install typescript
 make test
 ```
+
+Run the browser prototype with:
+
+```sh
+make web
+```
+
+Then open `http://localhost:5173/packages/web/`.

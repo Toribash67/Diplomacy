@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Diplomacy Board</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="board-pane" aria-label="Classic 1901 board">
+        <header class="topbar">
+          <div>
+            <h1>Classic 1901</h1>
+            <p id="phaseLabel"></p>
+          </div>
+          <div class="toolbar" aria-label="Map layers">
+            <label class="toggle">
+              <input id="adjacencyToggle" type="checkbox">
+              <span>Adjacency</span>
+            </label>
+            <label class="toggle">
+              <input id="labelsToggle" type="checkbox" checked>
+              <span>Labels</span>
+            </label>
+          </div>
+        </header>
+        <div class="map-frame">
+          <svg id="board" viewBox="0 0 1000 720" role="img" aria-labelledby="mapTitle">
+            <title id="mapTitle">Classic Diplomacy starting board</title>
+          </svg>
+        </div>
+      </section>
+      <aside class="side-pane" aria-label="Board details">
+        <section class="panel">
+          <h2>Selected</h2>
+          <div id="selection" class="selection"></div>
+        </section>
+        <section class="panel">
+          <h2>Powers</h2>
+          <div id="powerList" class="power-list"></div>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

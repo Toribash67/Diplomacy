@@ -25,12 +25,24 @@ packages/
       variants/
         classic1901.ts
         testVariant.ts
+  web/
+    index.html
+    src/
+      main.js
+      mapData.js
+      styles.css
 ```
 
-There is no web app yet. The engine is tested with brewed TypeScript and Node's built-in test runner via:
+The engine is tested with brewed TypeScript and Node's built-in test runner via:
 
 ```sh
 make test
+```
+
+The browser prototype is served without package dependencies via:
+
+```sh
+make web
 ```
 
 ## Engine Model
@@ -273,17 +285,20 @@ The first UI should be a local playable web app that consumes the engine directl
 
 The rules engine is now stable enough to start a local frontend. The next milestone should be a playable classic-map prototype, not a backend service.
 
+Status: a first dependency-free browser prototype exists in `packages/web`. It renders the Classic 1901 initial board from `classic1901.initialState`, uses separate render metadata in `mapData.js`, and can show province details, starting units, supply ownership, and an adjacency overlay.
+
 Recommended order:
 
 1. Create a frontend package
-   - Add a web app package beside `packages/engine`.
-   - Consume the engine package directly.
-   - Start with a local development server and no persistence.
+   - Done as `packages/web`, beside `packages/engine`.
+   - It consumes the built engine modules directly.
+   - It starts with a local development server and no persistence.
 
 2. Add a classic map render layer
+   - Started with coordinate metadata keyed by `ProvinceId`.
    - Use `classic1901` provinces, locations, and initial state as the rules source of truth.
    - Keep render metadata separate from rules data.
-   - Store SVG path geometry, label positions, unit positions, and coast anchors keyed by `ProvinceId` and `LocationId`.
+   - Replace the node-map prototype with SVG path geometry, label positions, unit positions, and coast anchors keyed by `ProvinceId` and `LocationId`.
    - Prefer an SVG board first because clickable provinces, overlays, labels, and unit markers are straightforward.
 
 3. Render board state
