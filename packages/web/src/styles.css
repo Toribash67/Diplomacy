@@ -124,6 +124,18 @@ h2 {
   opacity: 0.94;
 }
 
+.ownership-region {
+  pointer-events: none;
+}
+
+.supply-center-region {
+  opacity: 0.32;
+}
+
+.last-occupier-region {
+  opacity: 0.16;
+}
+
 .province {
   cursor: pointer;
 }

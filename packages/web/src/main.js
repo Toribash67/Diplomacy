@@ -33,6 +33,7 @@ let lastResult = undefined;
 let lastOrderUnitLabels = new Map();
 let selectedProvinceId = "par";
 let draftOrders = new Map();
+let landProvinceOwners = landProvinceOwnersFromUnits(state.units);
 let provinceGeometry = new Map();
 let provinceLabelPositions = new Map();
 let supplyCenterPositions = new Map();
@@ -100,6 +101,12 @@ function renderBoard() {
   board.append(svg("rect", { class: "map-water", x: 0, y: 0, width: mapSize.width, height: mapSize.height }));
   board.append(svg("image", { class: "map-image", href: sanitizedMapImageUrl, x: 0, y: 0, width: mapSize.width, height: mapSize.height }));
 
+  const ownership = svg("g", { class: "ownership-regions" });
+  for (const province of classic1901.provinces) {
+    ownership.append(renderOwnershipRegion(province));
+  }
+  board.append(ownership);
+
   const clickTargets = svg("g", { class: "province-targets" });
   for (const province of classic1901.provinces) {
     clickTargets.append(renderProvinceTarget(province));
@@ -111,6 +118,37 @@ function renderBoard() {
     units.append(renderUnit(unit));
   }
   board.append(units);
+}
+
+function renderOwnershipRegion(province) {
+  const supplyCenterOwner = province.supplyCenter ? state.supplyCenterOwners[province.id] : undefined;
+  const lastOccupier = landProvinceOwners[province.id];
+  const group = svg("g", { class: "ownership-region" });
+
+  if (supplyCenterOwner) {
+    group.append(ownershipLayer(province, supplyCenterOwner, "supply-center-region"));
+  }
+
+  if (lastOccupier && lastOccupier !== supplyCenterOwner) {
+    group.append(ownershipLayer(province, lastOccupier, "last-occupier-region"));
+  }
+
+  return group;
+}
+
+function ownershipLayer(province, owner, className) {
+  const group = svg("g", { class: className });
+  const paths = provinceGeometry.get(province.id) ?? [];
+  if (paths.length > 0) {
+    for (const path of paths) {
+      group.append(svg("path", { d: path, fill: powerColors[owner] }));
+    }
+    return group;
+  }
+
+  const [x, y] = positionForProvince(province.id);
+  group.append(svg("circle", { cx: x, cy: y, r: 16, fill: powerColors[owner] }));
+  return group;
 }
 
 function renderProvinceTarget(province) {
@@ -381,6 +419,10 @@ function submitOrders() {
 
   lastResult = adjudicate(state, orders, classic1901);
   state = cloneState(lastResult.nextState);
+  landProvinceOwners = {
+    ...landProvinceOwners,
+    ...landProvinceOwnersFromUnits(state.units),
+  };
   draftOrders = new Map();
 
   if (!provinceById.has(selectedProvinceId) || unitsInProvince(selectedProvinceId).length === 0) {
@@ -429,12 +471,19 @@ function resetGame() {
   lastResult = undefined;
   lastOrderUnitLabels = new Map();
   draftOrders = new Map();
+  landProvinceOwners = landProvinceOwnersFromUnits(state.units);
   selectedProvinceId = "par";
   render();
 }
 
 function unitsInProvince(provinceId) {
   return state.units.filter((unit) => locationById.get(unit.location)?.province === provinceId);
+}
+
+function landProvinceOwnersFromUnits(units) {
+  return Object.fromEntries(units
+    .map((unit) => [locationById.get(unit.location)?.province, unit.power])
+    .filter(([provinceId]) => provinceById.get(provinceId)?.type !== "sea"));
 }
 
 function sortedUnits(units) {
