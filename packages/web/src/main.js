@@ -297,6 +297,14 @@ function renderPowerList() {
 }
 
 function addExtraProvincePaths(document, geometry) {
+  const replacementPathByProvince = {
+    nth: ["m171 197v-16c0-3.55 0.7-7.06 2.06-10.33 1.35-3.28 3.34-6.25 5.85-8.76 2.51-2.51 5.48-4.5 8.76-5.85 3.27-1.36 6.78-2.06 10.33-2.06h43v70h7l-3 13h-34v64h-38l-5-3-8 2-13-3-2-14 5-6 3-6 13-2 3-4 1-13-2-6-5-7-2-8-4-2-6-1 7-1 7-4 5-8z"],
+  };
+
+  for (const [provinceId, paths] of Object.entries(replacementPathByProvince)) {
+    geometry.set(provinceId, paths);
+  }
+
   const extraPathByProvince = {
     bul: ["m371 438l-5 1 5 17-6 5 4 3h7l12-4 4 12 8-4 8 2 5-6-1-10"],
     spa: ["m134 417l-11-5-10-5-1-8-11-3-5 1-24-13-13-3-5-6-6-1-2 4-7-3-6 6 2 3-3 12 11-1-1 4 13 1 7 7-1 4-9 1-10 20-5-1 3 10"],
