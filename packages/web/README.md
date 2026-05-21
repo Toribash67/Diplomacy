@@ -19,13 +19,17 @@ The app imports the built engine from `packages/engine/dist`, so `make web` runs
 Current scope:
 
 - render the Classic 1901 starting board from engine data
+- use a local copy of the Wikimedia Commons standard Diplomacy SVG map
 - keep visual map metadata separate from variant rules data
 - inspect provinces, supply ownership, locations, and starting units
-- toggle a province-level adjacency overlay
+- render split-coast fleets at location-specific anchors
+- submit simple hold and adjacent move orders for all powers
+
+Map attribution: `assets/diplomacy.svg` is based on [Diplomacy.svg](https://commons.wikimedia.org/wiki/File:Diplomacy.svg) by Martin Asal and contributors, licensed under CC BY-SA 3.0 and GFDL.
 
 Next useful slices:
 
-- replace coordinate nodes with proper SVG territory paths
-- add order-entry controls for the selected unit
-- submit movement orders to `adjudicate`
-- render adjudication results, retreats, and phase changes
+- replace overlay click targets with province SVG paths
+- add support and convoy order entry
+- add explicit retreat and build order screens
+- render movement arrows, bounces, dislodgements, and ownership changes

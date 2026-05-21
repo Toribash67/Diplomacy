@@ -16,10 +16,6 @@
           </div>
           <div class="toolbar" aria-label="Map layers">
             <label class="toggle">
-              <input id="adjacencyToggle" type="checkbox">
-              <span>Adjacency</span>
-            </label>
-            <label class="toggle">
               <input id="labelsToggle" type="checkbox" checked>
               <span>Labels</span>
             </label>
@@ -37,9 +33,24 @@
           <div id="selection" class="selection"></div>
         </section>
         <section class="panel">
+          <h2>Orders</h2>
+          <div class="order-actions">
+            <button id="submitOrders" class="primary-button" type="button">Submit Orders</button>
+            <button id="resetGame" class="secondary-button" type="button">Reset</button>
+          </div>
+          <div id="orderList" class="order-list"></div>
+        </section>
+        <section class="panel">
+          <h2>Results</h2>
+          <div id="resultList" class="result-list"></div>
+        </section>
+        <section class="panel">
           <h2>Powers</h2>
           <div id="powerList" class="power-list"></div>
         </section>
+        <p class="attribution">
+          Map: <a href="https://commons.wikimedia.org/wiki/File:Diplomacy.svg">Diplomacy.svg</a> by Martin Asal and contributors, CC BY-SA 3.0.
+        </p>
       </aside>
     </main>
     <script type="module" src="./src/main.js"></script>
