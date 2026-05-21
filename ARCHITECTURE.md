@@ -281,6 +281,8 @@ The first UI should be a local playable web app that consumes the engine directl
 - show results and explanations
 - inspect retreats/builds
 
+The current web prototype can also be built as a static container. The Docker image compiles the engine in a Node build stage, then serves `packages/web` and the compiled engine modules from nginx.
+
 ### Frontend And Map Roadmap
 
 The rules engine is now stable enough to start a local frontend. The next milestone should be a playable classic-map prototype, not a backend service.
@@ -328,6 +330,18 @@ Recommended order:
 7. Defer backend work
    - Do not introduce users, deadlines, press, draw votes, or persistence until the local UI can play through phases.
    - Once the local UI is usable, the async service can persist snapshots and submitted orders around the same pure engine boundary.
+
+### NAS Deployment
+
+The initial deployment target is a static web container managed by Dockge:
+
+- `Dockerfile` builds the engine and packages the web prototype into nginx.
+- `.github/workflows/web-container.yml` publishes `ghcr.io/toribash67/diplomacy-web:latest` on pushes to `main`.
+- `deploy/dockge/compose.yml` is the stack file to paste or import into Dockge.
+
+The compose file maps NAS port `18080` to container port `80`. Change the left-hand port if `18080` is already used on the NAS.
+
+For hands-off updates after each push, run the Watchtower stack in `deploy/watchtower/compose.yml`. It uses `--label-enable`, and the Diplomacy container opts in with `com.centurylinklabs.watchtower.enable=true`, so unrelated NAS containers are left alone.
 
 ### Async Service
 

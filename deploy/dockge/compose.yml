@@ -1,0 +1,9 @@
+services:
+  diplomacy-web:
+    image: ghcr.io/toribash67/diplomacy-web:latest
+    container_name: diplomacy-web
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      - "18080:80"
