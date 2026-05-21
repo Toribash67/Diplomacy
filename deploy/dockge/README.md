@@ -39,8 +39,8 @@ labels:
 
 If you do not already run Watchtower, create a separate Dockge stack from `deploy/watchtower/compose.yml`. That Watchtower stack uses `--label-enable`, so it will only update explicitly opted-in containers.
 
-With the default Watchtower interval, pushes to `main` should flow like this:
+With the configured Watchtower interval, pushes to `main` should flow like this:
 
 1. GitHub Actions builds and publishes `ghcr.io/toribash67/diplomacy-web:latest`.
-2. Watchtower sees the new image within about five minutes.
+2. Watchtower sees the new image within about one minute.
 3. Watchtower pulls the image and restarts `diplomacy-web`.

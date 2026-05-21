@@ -33,4 +33,4 @@ Then open `http://localhost:18080/`.
 
 The Dockge compose file lives at `deploy/dockge/compose.yml` and uses the GHCR image published by the `Web Container` GitHub Actions workflow.
 
-For continuous NAS updates, run the Watchtower stack in `deploy/watchtower/compose.yml`. The Diplomacy container is opted in with a Watchtower label, and Watchtower is configured to ignore unlabeled containers.
+For continuous NAS updates, run the Watchtower stack in `deploy/watchtower/compose.yml`. The Diplomacy container is opted in with a Watchtower label, and Watchtower is configured to ignore unlabeled containers while checking for updates every minute.

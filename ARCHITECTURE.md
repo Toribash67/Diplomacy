@@ -341,7 +341,7 @@ The initial deployment target is a static web container managed by Dockge:
 
 The compose file maps NAS port `18080` to container port `80`. Change the left-hand port if `18080` is already used on the NAS.
 
-For hands-off updates after each push, run the Watchtower stack in `deploy/watchtower/compose.yml`. It uses `--label-enable`, and the Diplomacy container opts in with `com.centurylinklabs.watchtower.enable=true`, so unrelated NAS containers are left alone.
+For hands-off updates after each push, run the Watchtower stack in `deploy/watchtower/compose.yml`. It uses `--label-enable`, checks every minute, and the Diplomacy container opts in with `com.centurylinklabs.watchtower.enable=true`, so unrelated NAS containers are left alone.
 
 ### Async Service
 

@@ -17,7 +17,7 @@ labels:
 
 The Diplomacy Dockge stack already has that label. Other NAS containers will not be touched unless you opt them in.
 
-The interval is `300` seconds, so after GitHub Actions publishes a new `latest` image, the NAS should pick it up within about five minutes.
+The interval is `60` seconds, so after GitHub Actions publishes a new `latest` image, the NAS should pick it up within about one minute.
 
 If the GHCR package is private, run this on the NAS before starting the stack:
 
