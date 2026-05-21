@@ -1,4 +1,4 @@
-import { classic1901 } from "../../engine/dist/index.js";
+import { classic1901 } from "/packages/engine/dist/index.js";
 import { provincePositions } from "./mapData.js";
 
 const powerColors = {
