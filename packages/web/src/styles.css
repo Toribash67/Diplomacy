@@ -316,7 +316,7 @@ h2 {
 
 .order-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(68px, 78px) minmax(74px, 96px);
+  grid-template-columns: minmax(0, 1.1fr) minmax(86px, 98px) minmax(0, 1fr) minmax(72px, 92px);
   gap: 6px;
   align-items: center;
 }
@@ -355,6 +355,21 @@ h2 {
   background: #ffffff;
   color: #1f282f;
   padding: 0 6px;
+}
+
+.order-field.empty {
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8dee1;
+  border-radius: 6px;
+  background: #eef1f2;
+  color: #7a858e;
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
 }
 
 .result-row {

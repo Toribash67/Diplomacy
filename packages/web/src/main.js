@@ -437,7 +437,7 @@ function renderOrders() {
   }
 
   for (const unit of sortedUnits(state.units)) {
-    const currentDraft = draftOrders.get(unit.id) ?? { type: "hold" };
+    const currentDraft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
     const row = element("div", { className: "order-row" });
     const unitButton = element("button", { className: "order-unit", type: "button", textContent: unitLabel(unit) });
     unitButton.addEventListener("click", () => selectProvince(locationById.get(unit.location).province));
@@ -445,22 +445,72 @@ function renderOrders() {
     const action = element("select", { className: "order-select" });
     action.append(option("hold", "Hold", currentDraft.type === "hold"));
     action.append(option("move", "Move", currentDraft.type === "move"));
+    if (convoyDestinationsForArmy(unit).length > 0) {
+      action.append(option("move-via-convoy", "Via convoy", currentDraft.type === "move-via-convoy"));
+    }
+    if (convoyOptionsForFleet(unit).length > 0) {
+      action.append(option("convoy", "Convoy", currentDraft.type === "convoy"));
+    }
     action.addEventListener("change", () => {
-      const nextType = action.value;
-      draftOrders.set(unit.id, nextType === "move" ? { type: "move", to: legalDestinations(unit)[0]?.id } : { type: "hold" });
+      draftOrders.set(unit.id, defaultDraftForAction(unit, action.value));
       renderOrders();
     });
 
-    const destination = element("select", { className: "order-select" });
-    destination.disabled = currentDraft.type !== "move";
-    for (const location of legalDestinations(unit)) {
-      destination.append(option(location.id, destinationLabel(location), currentDraft.to === location.id));
-    }
-    destination.addEventListener("change", () => {
-      draftOrders.set(unit.id, { type: "move", to: destination.value });
-    });
+    let firstField = emptyOrderField();
+    let secondField = emptyOrderField();
 
-    row.append(unitButton, action, destination);
+    if (currentDraft.type === "move" || currentDraft.type === "move-via-convoy") {
+      const destinations = currentDraft.type === "move" ? legalDestinations(unit) : convoyDestinationsForArmy(unit);
+      const destination = element("select", { className: "order-select" });
+      for (const location of destinations) {
+        destination.append(option(location.id, destinationLabel(location), currentDraft.to === location.id));
+      }
+      destination.addEventListener("change", () => {
+        draftOrders.set(unit.id, { ...currentDraft, to: destination.value });
+      });
+
+      firstField = destination;
+    }
+
+    if (currentDraft.type === "convoy") {
+      const convoyOptions = convoyOptionsForFleet(unit);
+      const selectedOption = convoyOptions.find((candidate) => candidate.army.id === currentDraft.convoyedUnitId)
+        ?? convoyOptions[0];
+      const destinations = selectedOption?.destinations ?? [];
+      const convoyedUnit = element("select", { className: "order-select" });
+      for (const candidate of convoyOptions) {
+        convoyedUnit.append(option(candidate.army.id, unitLabel(candidate.army), selectedOption?.army.id === candidate.army.id));
+      }
+      convoyedUnit.addEventListener("change", () => {
+        const nextOption = convoyOptions.find((candidate) => candidate.army.id === convoyedUnit.value);
+        const nextDestination = nextOption?.destinations[0]?.id;
+        draftOrders.set(unit.id, {
+          type: "convoy",
+          convoyedUnitId: convoyedUnit.value,
+          to: nextDestination,
+        });
+        if (nextOption && nextDestination) {
+          draftOrders.set(nextOption.army.id, { type: "move-via-convoy", to: nextDestination });
+        }
+        renderOrders();
+      });
+
+      const destination = element("select", { className: "order-select" });
+      for (const location of destinations) {
+        destination.append(option(location.id, destinationLabel(location), currentDraft.to === location.id));
+      }
+      destination.addEventListener("change", () => {
+        draftOrders.set(unit.id, { ...currentDraft, to: destination.value });
+        if (selectedOption) {
+          draftOrders.set(selectedOption.army.id, { type: "move-via-convoy", to: destination.value });
+        }
+      });
+
+      firstField = convoyedUnit;
+      secondField = destination;
+    }
+
+    row.append(unitButton, action, firstField, secondField);
     orderList.append(row);
   }
 }
@@ -609,11 +659,19 @@ function submitOrders() {
 
 function buildMovementOrders() {
   return sortedUnits(state.units).map((unit, index) => {
-    const draft = draftOrders.get(unit.id) ?? { type: "hold" };
+    const draft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
     const id = `order:${state.phase.year}:${state.phase.season}:${index}:${unit.id}`;
 
     if (draft.type === "move" && draft.to) {
       return { id, type: "move", unitId: unit.id, to: draft.to };
+    }
+
+    if (draft.type === "move-via-convoy" && draft.to) {
+      return { id, type: "move", unitId: unit.id, to: draft.to, viaConvoy: true };
+    }
+
+    if (draft.type === "convoy" && draft.convoyedUnitId && draft.to) {
+      return { id, type: "convoy", unitId: unit.id, convoyedUnitId: draft.convoyedUnitId, to: draft.to };
     }
 
     return { id, type: "hold", unitId: unit.id };
@@ -634,6 +692,185 @@ function legalDestinations(unit) {
     .map((adjacency) => locationById.get(adjacency.to))
     .filter(Boolean)
     .sort((left, right) => destinationLabel(left).localeCompare(destinationLabel(right)));
+}
+
+function normalizedDraftForUnit(unit, draft) {
+  if (!draft) {
+    return { type: "hold" };
+  }
+
+  if (draft.type === "move") {
+    const destinations = legalDestinations(unit);
+    const to = destinations.some((location) => location.id === draft.to) ? draft.to : destinations[0]?.id;
+    return to ? { type: "move", to } : { type: "hold" };
+  }
+
+  if (draft.type === "move-via-convoy") {
+    const destinations = convoyDestinationsForArmy(unit);
+    const to = destinations.some((location) => location.id === draft.to) ? draft.to : destinations[0]?.id;
+    return to ? { type: "move-via-convoy", to } : { type: "hold" };
+  }
+
+  if (draft.type === "convoy") {
+    const convoyOptions = convoyOptionsForFleet(unit);
+    const selectedOption = convoyOptions.find((candidate) => candidate.army.id === draft.convoyedUnitId) ?? convoyOptions[0];
+    const destinations = selectedOption?.destinations ?? [];
+    const to = destinations.some((location) => location.id === draft.to) ? draft.to : destinations[0]?.id;
+    if (selectedOption && to) {
+      return { type: "convoy", convoyedUnitId: selectedOption.army.id, to };
+    }
+  }
+
+  return { type: "hold" };
+}
+
+function defaultDraftForAction(unit, action) {
+  if (action === "move") {
+    const destination = legalDestinations(unit)[0];
+    return destination ? { type: "move", to: destination.id } : { type: "hold" };
+  }
+
+  if (action === "move-via-convoy") {
+    const destination = convoyDestinationsForArmy(unit)[0];
+    return destination ? { type: "move-via-convoy", to: destination.id } : { type: "hold" };
+  }
+
+  if (action === "convoy") {
+    const convoyOption = convoyOptionsForFleet(unit)[0];
+    const destination = convoyOption?.destinations[0];
+    if (convoyOption && destination) {
+      draftOrders.set(convoyOption.army.id, { type: "move-via-convoy", to: destination.id });
+      return { type: "convoy", convoyedUnitId: convoyOption.army.id, to: destination.id };
+    }
+  }
+
+  return { type: "hold" };
+}
+
+function convoyOptionsForFleet(unit) {
+  if (!isSeaFleet(unit)) {
+    return [];
+  }
+
+  return sortedUnits(state.units)
+    .filter((candidate) => candidate.type === "army")
+    .map((army) => ({
+      army,
+      destinations: convoyDestinationsForArmy(army, { requiredFleetLocation: unit.location }),
+    }))
+    .filter((option) => option.destinations.length > 0);
+}
+
+function convoyDestinationsForArmy(unit, options = {}) {
+  if (unit.type !== "army") {
+    return [];
+  }
+
+  return classic1901.locations
+    .filter((location) => location.unitTypes.includes("army"))
+    .filter((location) => isConvoyableMove(unit, location.id))
+    .filter((location) => hasPotentialSeaConvoyRoute(unit, location.id, options))
+    .sort((left, right) => destinationLabel(left).localeCompare(destinationLabel(right)));
+}
+
+function hasPotentialSeaConvoyRoute(unit, to, options = {}) {
+  if (!isConvoyableMove(unit, to)) {
+    return false;
+  }
+
+  const fleetLocations = new Set(
+    state.units
+      .filter(isSeaFleet)
+      .map((fleet) => fleet.location)
+      .filter((location) => location !== options.excludedFleetLocation),
+  );
+
+  if (options.requiredFleetLocation) {
+    if (!fleetLocations.has(options.requiredFleetLocation)) {
+      return false;
+    }
+
+    const component = connectedSeaFleetLocations(options.requiredFleetLocation, fleetLocations);
+    return hasFleetReach(component, locationProvince(unit.location)) && hasFleetReach(component, locationProvince(to));
+  }
+
+  const startProvince = locationProvince(unit.location);
+  const destinationProvince = locationProvince(to);
+  const queue = [...fleetLocations].filter((location) => canFleetReachProvince(location, startProvince));
+  const visited = new Set(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const fleetLocation = queue[index];
+    if (canFleetReachProvince(fleetLocation, destinationProvince)) {
+      return true;
+    }
+
+    for (const next of adjacentLocations("fleet", fleetLocation)) {
+      if (!fleetLocations.has(next) || visited.has(next)) {
+        continue;
+      }
+
+      visited.add(next);
+      queue.push(next);
+    }
+  }
+
+  return false;
+}
+
+function connectedSeaFleetLocations(start, fleetLocations) {
+  const queue = [start];
+  const visited = new Set(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    for (const next of adjacentLocations("fleet", queue[index])) {
+      if (!fleetLocations.has(next) || visited.has(next)) {
+        continue;
+      }
+
+      visited.add(next);
+      queue.push(next);
+    }
+  }
+
+  return visited;
+}
+
+function hasFleetReach(fleetLocations, provinceId) {
+  return [...fleetLocations].some((location) => canFleetReachProvince(location, provinceId));
+}
+
+function isSeaFleet(unit) {
+  return unit.type === "fleet" && locationById.get(unit.location)?.type === "sea";
+}
+
+function isConvoyableMove(unit, to) {
+  if (unit.type !== "army") {
+    return false;
+  }
+
+  const fromProvince = provinceById.get(locationProvince(unit.location));
+  const toProvince = provinceById.get(locationProvince(to));
+  return fromProvince?.id !== toProvince?.id && fromProvince?.type === "coastal" && toProvince?.type === "coastal";
+}
+
+function canFleetReachProvince(from, provinceId) {
+  return adjacentLocations("fleet", from).some((location) => locationProvince(location) === provinceId);
+}
+
+function adjacentLocations(unitType, from) {
+  return (classic1901.adjacency[from] ?? [])
+    .filter((adjacency) => adjacency.unitTypes.includes(unitType))
+    .map((adjacency) => adjacency.to);
+}
+
+function locationProvince(locationId) {
+  const location = locationById.get(locationId);
+  if (!location) {
+    throw new Error(`Unknown location ${locationId}.`);
+  }
+
+  return location.province;
 }
 
 function selectProvince(provinceId) {
@@ -677,7 +914,12 @@ function destinationLabel(location) {
 
 function orderResultText(result) {
   if (result.order.type === "move") {
-    return `${unitName(result.order.unitId)} -> ${String(result.order.to).toUpperCase()}`;
+    const convoyText = result.order.viaConvoy ? " via convoy" : "";
+    return `${unitName(result.order.unitId)} -> ${String(result.order.to).toUpperCase()}${convoyText}`;
+  }
+
+  if (result.order.type === "convoy") {
+    return `${unitName(result.order.unitId)} convoy ${unitName(result.order.convoyedUnitId)} -> ${String(result.order.to).toUpperCase()}`;
   }
 
   if (result.order.type === "disband") {
@@ -764,6 +1006,12 @@ function text(value, attributes = {}) {
 function option(value, label, selected) {
   const node = element("option", { value, textContent: label });
   node.selected = selected;
+  return node;
+}
+
+function emptyOrderField() {
+  const node = element("div", { className: "order-field empty", textContent: "N/A" });
+  node.setAttribute("aria-hidden", "true");
   return node;
 }
 
