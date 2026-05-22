@@ -265,6 +265,7 @@ function renderBoard() {
   board.replaceChildren();
   board.classList.toggle("hide-labels", !labelsToggle.checked);
 
+  board.append(renderArrowDefs());
   board.append(svg("rect", { class: "map-water", x: 0, y: 0, width: mapSize.width, height: mapSize.height }));
   board.append(svg("image", { class: "map-image", href: sanitizedMapImageUrl, x: 0, y: 0, width: mapSize.width, height: mapSize.height }));
 
@@ -280,11 +281,111 @@ function renderBoard() {
   }
   board.append(clickTargets);
 
+  board.append(renderOrderArrows());
+
   const units = svg("g", { class: "units" });
   for (const unit of state.units) {
     units.append(renderUnit(unit));
   }
   board.append(units);
+}
+
+function renderArrowDefs() {
+  const defs = svg("defs");
+  defs.append(renderArrowMarker("order-arrowhead-black", "#111820"));
+  defs.append(renderArrowMarker("order-arrowhead-convoy", "#1f6f9c"));
+  return defs;
+}
+
+function renderArrowMarker(id, fill) {
+  const marker = svg("marker", {
+    id,
+    viewBox: "0 0 10 10",
+    refX: 10,
+    refY: 5,
+    markerWidth: 5.5,
+    markerHeight: 5.5,
+    markerUnits: "userSpaceOnUse",
+    orient: "auto-start-reverse",
+  });
+  marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill }));
+  return marker;
+}
+
+function renderOrderArrows() {
+  const group = svg("g", { class: "order-arrows", "aria-hidden": "true" });
+  if (state.phase.type !== "movement") {
+    return group;
+  }
+
+  for (const unit of sortedUnits(state.units)) {
+    const draft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
+
+    if ((draft.type === "move" || draft.type === "move-via-convoy") && draft.to) {
+      group.append(renderMoveArrow(unit, draft));
+    }
+
+    if (draft.type === "support" && draft.supportedUnitId) {
+      const supportArrow = renderSupportArrow(unit, draft);
+      if (supportArrow) {
+        group.append(supportArrow);
+      }
+    }
+
+    if (draft.type === "convoy" && draft.convoyedUnitId && draft.to) {
+      const convoyArrow = renderConvoyArrow(unit, draft);
+      if (convoyArrow) {
+        group.append(convoyArrow);
+      }
+    }
+  }
+
+  return group;
+}
+
+function renderMoveArrow(unit, draft) {
+  const group = svg("g", { class: "order-arrow-group move-order" });
+  appendOrderArrow(group, [unitAnchor(unit), locationAnchor(draft.to)], "move", "order-arrowhead-black");
+  return group;
+}
+
+function renderSupportArrow(unit, draft) {
+  const supportedUnit = state.units.find((candidate) => candidate.id === draft.supportedUnitId);
+  if (!supportedUnit) {
+    return undefined;
+  }
+
+  const supportedAnchor = unitAnchor(supportedUnit);
+  const points = draft.to
+    ? [unitAnchor(unit), supportedAnchor, locationAnchor(draft.to)]
+    : [unitAnchor(unit), supportedAnchor];
+  const group = svg("g", { class: "order-arrow-group support-order" });
+  appendOrderArrow(group, points, "support", "order-arrowhead-black");
+  group.append(svg("circle", { class: "order-arrow-node support", cx: supportedAnchor[0], cy: supportedAnchor[1], r: 4.2 }));
+  return group;
+}
+
+function renderConvoyArrow(unit, draft) {
+  const convoyedUnit = state.units.find((candidate) => candidate.id === draft.convoyedUnitId);
+  if (!convoyedUnit) {
+    return undefined;
+  }
+
+  const fleetAnchor = unitAnchor(unit);
+  const group = svg("g", { class: "order-arrow-group convoy-order" });
+  appendOrderArrow(group, [unitAnchor(convoyedUnit), fleetAnchor, locationAnchor(draft.to)], "convoy", "order-arrowhead-convoy");
+  group.append(svg("circle", { class: "order-arrow-node convoy", cx: fleetAnchor[0], cy: fleetAnchor[1], r: 4.4 }));
+  return group;
+}
+
+function appendOrderArrow(group, points, className, markerId) {
+  const pathData = arrowPath(points);
+  if (!pathData) {
+    return;
+  }
+
+  group.append(svg("path", { class: `order-arrow underlay ${className}`, d: pathData }));
+  group.append(svg("path", { class: `order-arrow ${className}`, d: pathData, "marker-end": `url(#${markerId})` }));
 }
 
 function renderOwnershipRegion(province) {
@@ -370,9 +471,7 @@ function renderProvinceTarget(province) {
 function renderUnit(unit) {
   const location = locationById.get(unit.location);
   const province = provinceById.get(location.province);
-  const [x, y] = initialLocationByUnitId.get(unit.id) === unit.location
-    ? unitPositions[unit.id] ?? positionForLocation(unit.location, location.province)
-    : positionForLocation(unit.location, location.province);
+  const [x, y] = unitAnchor(unit);
   const group = svg("g", {
     class: `unit ${unit.power}`,
     "aria-label": `${powerById.get(unit.power).name} ${unit.type} in ${province.name}`,
@@ -381,6 +480,41 @@ function renderUnit(unit) {
   const labelX = unit.type === "fleet" ? x + 1.4 : x;
   group.append(text(unit.type === "army" ? "A" : "F", { class: "unit-label", x: labelX, y: y + 3 }));
   return group;
+}
+
+function unitAnchor(unit) {
+  const location = locationById.get(unit.location);
+  return initialLocationByUnitId.get(unit.id) === unit.location
+    ? unitPositions[unit.id] ?? positionForLocation(unit.location, location.province)
+    : positionForLocation(unit.location, location.province);
+}
+
+function locationAnchor(locationId) {
+  const location = locationById.get(locationId);
+  return positionForLocation(locationId, location?.province);
+}
+
+function arrowPath(points) {
+  const uniquePoints = points.filter((point, index) => {
+    const previous = points[index - 1];
+    return !previous || distance(previous, point) > 1;
+  });
+
+  if (uniquePoints.length < 2) {
+    return undefined;
+  }
+
+  return uniquePoints
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${formatCoordinate(point[0])} ${formatCoordinate(point[1])}`)
+    .join(" ");
+}
+
+function distance(left, right) {
+  return Math.hypot(right[0] - left[0], right[1] - left[1]);
+}
+
+function formatCoordinate(value) {
+  return Number.parseFloat(value.toFixed(2));
 }
 
 function renderSelection() {
@@ -456,7 +590,7 @@ function renderOrders() {
     }
     action.addEventListener("change", () => {
       draftOrders.set(unit.id, defaultDraftForAction(unit, action.value));
-      renderOrders();
+      render();
     });
 
     let firstField = emptyOrderField();
@@ -470,6 +604,7 @@ function renderOrders() {
       }
       destination.addEventListener("change", () => {
         draftOrders.set(unit.id, { ...currentDraft, to: destination.value });
+        renderBoard();
       });
 
       firstField = destination;
@@ -495,7 +630,7 @@ function renderOrders() {
         if (nextOption && nextDestination) {
           draftOrders.set(nextOption.army.id, { type: "move-via-convoy", to: nextDestination });
         }
-        renderOrders();
+        render();
       });
 
       const destination = element("select", { className: "order-select" });
@@ -507,6 +642,7 @@ function renderOrders() {
         if (selectedOption) {
           draftOrders.set(selectedOption.army.id, { type: "move-via-convoy", to: destination.value });
         }
+        render();
       });
 
       firstField = convoyedUnit;
@@ -529,7 +665,7 @@ function renderOrders() {
         const nextTarget = defaultSupportTarget(nextOption?.unit, nextOption?.targets ?? []);
         draftOrders.set(unit.id, supportDraft(nextOption?.unit, nextTarget));
         alignSupportedUnitDraft(nextOption?.unit, nextTarget);
-        renderOrders();
+        render();
       });
 
       const target = element("select", { className: "order-select" });
@@ -540,6 +676,7 @@ function renderOrders() {
         const nextTarget = supportTargets.find((candidate) => targetValue(candidate) === target.value);
         draftOrders.set(unit.id, supportDraft(selectedOption?.unit, nextTarget));
         alignSupportedUnitDraft(selectedOption?.unit, nextTarget);
+        render();
       });
 
       firstField = supportedUnit;

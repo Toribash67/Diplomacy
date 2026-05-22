@@ -146,6 +146,55 @@ h2 {
   opacity: 0.16;
 }
 
+.order-arrows {
+  pointer-events: none;
+}
+
+.order-arrow {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.order-arrow.move {
+  stroke: #111820;
+  stroke-width: 3px;
+}
+
+.order-arrow.support {
+  stroke: #111820;
+  stroke-dasharray: 8 5;
+  stroke-width: 3px;
+}
+
+.order-arrow.convoy {
+  stroke: #1f6f9c;
+  stroke-dasharray: 3 6;
+  stroke-width: 3px;
+}
+
+.order-arrow.underlay {
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-dasharray: none;
+  stroke-width: 7px;
+}
+
+.order-arrow-node {
+  fill: #ffffff;
+  stroke-width: 2.2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.order-arrow-node.support {
+  stroke: #111820;
+}
+
+.order-arrow-node.convoy {
+  fill: #e7f4fb;
+  stroke: #1f6f9c;
+}
+
 .province {
   cursor: pointer;
 }

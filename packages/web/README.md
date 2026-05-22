@@ -24,6 +24,7 @@ Current scope:
 - inspect provinces, supply ownership, locations, and starting units
 - render split-coast fleets at location-specific anchors
 - submit hold, adjacent move, support, and convoy orders for all powers
+- preview draft move, support, and convoy orders with map arrows
 
 Map attribution: `assets/diplomacy.svg` is based on [Diplomacy.svg](https://commons.wikimedia.org/wiki/File:Diplomacy.svg) by Martin Asal and contributors, licensed under CC BY-SA 3.0 and GFDL.
 
@@ -31,4 +32,4 @@ Next useful slices:
 
 - replace overlay click targets with province SVG paths
 - add explicit retreat and build order screens
-- render movement arrows, bounces, dislodgements, and ownership changes
+- render adjudication bounces, dislodgements, and ownership changes

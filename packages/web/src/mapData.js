@@ -169,8 +169,8 @@ export const locationPositions = {
 };
 
 export const unitPositions = {
-  "austria-a-bud": [314, 360],
-  "austria-a-vie": [353, 378],
+  "austria-a-bud": [353, 378],
+  "austria-a-vie": [314, 360],
   "austria-f-tri": [305, 409],
   "england-f-edi": [155, 207],
   "england-f-lon": [160, 278],
