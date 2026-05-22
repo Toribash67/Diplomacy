@@ -3,6 +3,10 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #1c2126;
   background: #eef1f2;
+  --side-pane-width: 420px;
+  --side-pane-min-width: 300px;
+  --side-pane-max-width: 760px;
+  --pane-resizer-width: 10px;
 }
 
 * {
@@ -38,8 +42,14 @@ a:visited {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1fr) var(--pane-resizer-width) minmax(var(--side-pane-min-width), var(--side-pane-width));
   min-height: 100vh;
+}
+
+.app-shell.resizing,
+.app-shell.resizing * {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .board-pane {
@@ -186,8 +196,41 @@ h2 {
   pointer-events: none;
 }
 
-.side-pane {
+.pane-resizer {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  background: #e3e8eb;
   border-left: 1px solid #cbd3d8;
+  border-right: 1px solid #cbd3d8;
+}
+
+.pane-resizer::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 56px;
+  border-radius: 999px;
+  background: #8b98a1;
+  box-shadow: -3px 0 0 #8b98a1, 3px 0 0 #8b98a1;
+  transform: translate(-50%, -50%);
+}
+
+.pane-resizer:hover::before,
+.pane-resizer:focus-visible::before,
+.app-shell.resizing .pane-resizer::before {
+  background: #2f6f7e;
+  box-shadow: -3px 0 0 #2f6f7e, 3px 0 0 #2f6f7e;
+}
+
+.pane-resizer:focus-visible {
+  outline: 2px solid #2f6f7e;
+  outline-offset: -2px;
+}
+
+.side-pane {
   background: #f8f9f8;
   max-height: 100vh;
   overflow: auto;
@@ -273,7 +316,7 @@ h2 {
 
 .order-row {
   display: grid;
-  grid-template-columns: minmax(128px, 1fr) 78px 96px;
+  grid-template-columns: minmax(0, 1fr) minmax(68px, 78px) minmax(74px, 96px);
   gap: 6px;
   align-items: center;
 }
@@ -374,13 +417,16 @@ h2 {
   line-height: 1.35;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 720px) {
   .app-shell {
     grid-template-columns: 1fr;
   }
 
+  .pane-resizer {
+    display: none;
+  }
+
   .side-pane {
-    border-left: 0;
     border-top: 1px solid #cbd3d8;
     max-height: none;
   }

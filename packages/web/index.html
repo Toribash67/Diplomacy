@@ -27,7 +27,16 @@
           </svg>
         </div>
       </section>
-      <aside class="side-pane" aria-label="Board details">
+      <div
+        id="paneResizer"
+        class="pane-resizer"
+        role="separator"
+        aria-label="Resize order panel"
+        aria-orientation="vertical"
+        aria-controls="orderPanel"
+        tabindex="0"
+      ></div>
+      <aside id="orderPanel" class="side-pane" aria-label="Board details">
         <section class="panel">
           <h2>Selected</h2>
           <div id="selection" class="selection"></div>
