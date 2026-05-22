@@ -76,6 +76,7 @@ async function loadProvinceGeometry() {
   }
 
   addExtraProvincePaths(document, nextGeometry);
+  setImpassableBackground(document);
   removeEmbeddedMapOverlays(document);
   sanitizedMapImageUrl = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(document)], { type: "image/svg+xml" }));
   provinceGeometry = nextGeometry;
@@ -408,6 +409,12 @@ function removeEmbeddedMapOverlays(document) {
     }
     overlay.remove();
   }
+}
+
+function setImpassableBackground(document) {
+  const background = document.getElementById("Layer 1");
+  background?.classList.remove("s0");
+  background?.setAttribute("fill", "#dddddd");
 }
 
 function submitOrders() {
