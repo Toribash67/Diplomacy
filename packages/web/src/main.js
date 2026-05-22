@@ -451,6 +451,9 @@ function renderOrders() {
     if (convoyOptionsForFleet(unit).length > 0) {
       action.append(option("convoy", "Convoy", currentDraft.type === "convoy"));
     }
+    if (supportOptionsForUnit(unit).length > 0) {
+      action.append(option("support", "Support", currentDraft.type === "support"));
+    }
     action.addEventListener("change", () => {
       draftOrders.set(unit.id, defaultDraftForAction(unit, action.value));
       renderOrders();
@@ -508,6 +511,39 @@ function renderOrders() {
 
       firstField = convoyedUnit;
       secondField = destination;
+    }
+
+    if (currentDraft.type === "support") {
+      const supportOptions = supportOptionsForUnit(unit);
+      const selectedOption = supportOptions.find((candidate) => candidate.unit.id === currentDraft.supportedUnitId)
+        ?? supportOptions[0];
+      const supportTargets = selectedOption?.targets ?? [];
+      const selectedTarget = supportTargets.find((target) => targetValue(target) === targetValue(currentDraft))
+        ?? defaultSupportTarget(selectedOption?.unit, supportTargets);
+      const supportedUnit = element("select", { className: "order-select" });
+      for (const candidate of supportOptions) {
+        supportedUnit.append(option(candidate.unit.id, unitLabel(candidate.unit), selectedOption?.unit.id === candidate.unit.id));
+      }
+      supportedUnit.addEventListener("change", () => {
+        const nextOption = supportOptions.find((candidate) => candidate.unit.id === supportedUnit.value);
+        const nextTarget = defaultSupportTarget(nextOption?.unit, nextOption?.targets ?? []);
+        draftOrders.set(unit.id, supportDraft(nextOption?.unit, nextTarget));
+        alignSupportedUnitDraft(nextOption?.unit, nextTarget);
+        renderOrders();
+      });
+
+      const target = element("select", { className: "order-select" });
+      for (const candidate of supportTargets) {
+        target.append(option(targetValue(candidate), candidate.label, targetValue(candidate) === targetValue(selectedTarget)));
+      }
+      target.addEventListener("change", () => {
+        const nextTarget = supportTargets.find((candidate) => targetValue(candidate) === target.value);
+        draftOrders.set(unit.id, supportDraft(selectedOption?.unit, nextTarget));
+        alignSupportedUnitDraft(selectedOption?.unit, nextTarget);
+      });
+
+      firstField = supportedUnit;
+      secondField = target;
     }
 
     row.append(unitButton, action, firstField, secondField);
@@ -674,6 +710,12 @@ function buildMovementOrders() {
       return { id, type: "convoy", unitId: unit.id, convoyedUnitId: draft.convoyedUnitId, to: draft.to };
     }
 
+    if (draft.type === "support" && draft.supportedUnitId) {
+      return draft.to
+        ? { id, type: "support", unitId: unit.id, supportedUnitId: draft.supportedUnitId, to: draft.to }
+        : { id, type: "support", unitId: unit.id, supportedUnitId: draft.supportedUnitId };
+    }
+
     return { id, type: "hold", unitId: unit.id };
   });
 }
@@ -721,6 +763,17 @@ function normalizedDraftForUnit(unit, draft) {
     }
   }
 
+  if (draft.type === "support") {
+    const supportOptions = supportOptionsForUnit(unit);
+    const selectedOption = supportOptions.find((candidate) => candidate.unit.id === draft.supportedUnitId) ?? supportOptions[0];
+    const supportTargets = selectedOption?.targets ?? [];
+    const target = supportTargets.find((candidate) => targetValue(candidate) === targetValue(draft))
+      ?? defaultSupportTarget(selectedOption?.unit, supportTargets);
+    if (selectedOption && target) {
+      return supportDraft(selectedOption.unit, target);
+    }
+  }
+
   return { type: "hold" };
 }
 
@@ -744,7 +797,111 @@ function defaultDraftForAction(unit, action) {
     }
   }
 
+  if (action === "support") {
+    const supportOption = supportOptionsForUnit(unit)[0];
+    const target = defaultSupportTarget(supportOption?.unit, supportOption?.targets ?? []);
+    alignSupportedUnitDraft(supportOption?.unit, target);
+    return supportDraft(supportOption?.unit, target);
+  }
+
   return { type: "hold" };
+}
+
+function supportOptionsForUnit(unit) {
+  return sortedUnits(state.units)
+    .filter((candidate) => candidate.id !== unit.id)
+    .map((candidate) => ({
+      unit: candidate,
+      targets: supportTargetsForUnit(unit, candidate),
+    }))
+    .filter((candidate) => candidate.targets.length > 0);
+}
+
+function supportTargetsForUnit(supportingUnit, supportedUnit) {
+  const targets = [];
+
+  if (canSupportProvince(supportingUnit.type, supportingUnit.location, supportedUnit.location)) {
+    targets.push({ label: "Hold" });
+  }
+
+  for (const location of supportMoveDestinations(supportedUnit)) {
+    if (canSupportProvince(supportingUnit.type, supportingUnit.location, location.id)) {
+      targets.push({ label: destinationLabel(location), to: location.id });
+    }
+  }
+
+  return targets;
+}
+
+function supportMoveDestinations(unit) {
+  const destinations = new Map();
+  for (const location of [...legalDestinations(unit), ...convoyDestinationsForArmy(unit)]) {
+    destinations.set(location.id, location);
+  }
+
+  return [...destinations.values()].sort((left, right) => destinationLabel(left).localeCompare(destinationLabel(right)));
+}
+
+function defaultSupportTarget(supportedUnit, targets) {
+  const plannedDestination = supportedUnit ? plannedMoveDestination(supportedUnit) : undefined;
+  return targets.find((target) => target.to === plannedDestination)
+    ?? targets.find((target) => !target.to)
+    ?? targets[0];
+}
+
+function plannedMoveDestination(unit) {
+  const draft = draftOrders.get(unit.id);
+  if (draft?.type === "move" && legalDestinations(unit).some((location) => location.id === draft.to)) {
+    return draft.to;
+  }
+
+  if (draft?.type === "move-via-convoy" && convoyDestinationsForArmy(unit).some((location) => location.id === draft.to)) {
+    return draft.to;
+  }
+
+  return undefined;
+}
+
+function supportDraft(supportedUnit, target) {
+  if (!supportedUnit || !target) {
+    return { type: "hold" };
+  }
+
+  return target.to
+    ? { type: "support", supportedUnitId: supportedUnit.id, to: target.to }
+    : { type: "support", supportedUnitId: supportedUnit.id };
+}
+
+function alignSupportedUnitDraft(supportedUnit, target) {
+  if (!supportedUnit || !target) {
+    return;
+  }
+
+  draftOrders.set(supportedUnit.id, target.to ? movementDraftForDestination(supportedUnit, target.to) : { type: "hold" });
+}
+
+function movementDraftForDestination(unit, to) {
+  const canMoveDirectly = legalDestinations(unit).some((location) => location.id === to);
+  const canMoveViaConvoy = convoyDestinationsForArmy(unit).some((location) => location.id === to);
+  const currentDraft = draftOrders.get(unit.id);
+
+  if (currentDraft?.type === "move-via-convoy" && canMoveViaConvoy) {
+    return { type: "move-via-convoy", to };
+  }
+
+  if (canMoveDirectly) {
+    return { type: "move", to };
+  }
+
+  if (canMoveViaConvoy) {
+    return { type: "move-via-convoy", to };
+  }
+
+  return { type: "hold" };
+}
+
+function targetValue(target) {
+  return target?.to ? `move:${target.to}` : "hold";
 }
 
 function convoyOptionsForFleet(unit) {
@@ -858,6 +1015,11 @@ function canFleetReachProvince(from, provinceId) {
   return adjacentLocations("fleet", from).some((location) => locationProvince(location) === provinceId);
 }
 
+function canSupportProvince(unitType, from, target) {
+  const targetProvince = locationProvince(target);
+  return adjacentLocations(unitType, from).some((location) => locationProvince(location) === targetProvince);
+}
+
 function adjacentLocations(unitType, from) {
   return (classic1901.adjacency[from] ?? [])
     .filter((adjacency) => adjacency.unitTypes.includes(unitType))
@@ -920,6 +1082,11 @@ function orderResultText(result) {
 
   if (result.order.type === "convoy") {
     return `${unitName(result.order.unitId)} convoy ${unitName(result.order.convoyedUnitId)} -> ${String(result.order.to).toUpperCase()}`;
+  }
+
+  if (result.order.type === "support") {
+    const targetText = result.order.to ? ` -> ${String(result.order.to).toUpperCase()}` : " hold";
+    return `${unitName(result.order.unitId)} support ${unitName(result.order.supportedUnitId)}${targetText}`;
   }
 
   if (result.order.type === "disband") {

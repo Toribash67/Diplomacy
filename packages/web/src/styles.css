@@ -150,6 +150,10 @@ h2 {
   cursor: pointer;
 }
 
+.province:focus {
+  outline: none;
+}
+
 .province-hit {
   fill: transparent;
   pointer-events: all;
@@ -157,6 +161,7 @@ h2 {
   stroke-width: 1.4;
 }
 
+.province:focus-visible .province-hit,
 .province.selected .province-hit {
   fill: rgba(255, 255, 255, 0.18);
   stroke: #101820;
