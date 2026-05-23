@@ -15,6 +15,11 @@ const powerColors = {
   turkey: "#ffff00",
 };
 
+const orderArrowStrokeWidth = 2.25;
+const orderArrowHeadScale = 5.6;
+const orderArrowHeadLength = orderArrowStrokeWidth * orderArrowHeadScale;
+const orderArrowShaftShortening = orderArrowHeadLength * 0.42;
+
 const board = document.querySelector("#board");
 const selection = document.querySelector("#selection");
 const powerList = document.querySelector("#powerList");
@@ -294,20 +299,20 @@ function renderBoard() {
 
 function renderArrowDefs() {
   const defs = svg("defs");
-  defs.append(renderArrowMarker("order-arrowhead-black", "#111820"));
-  defs.append(renderArrowMarker("order-arrowhead-convoy", "#1f6f9c"));
+  defs.append(renderArrowMarker("order-arrowhead-black", "#111820", orderArrowHeadScale));
+  defs.append(renderArrowMarker("order-arrowhead-convoy", "#1f6f9c", orderArrowHeadScale));
   return defs;
 }
 
-function renderArrowMarker(id, fill) {
+function renderArrowMarker(id, fill, size) {
   const marker = svg("marker", {
     id,
     viewBox: "0 0 10 10",
     refX: 10,
     refY: 5,
-    markerWidth: 5.5,
-    markerHeight: 5.5,
-    markerUnits: "userSpaceOnUse",
+    markerWidth: size,
+    markerHeight: size,
+    markerUnits: "strokeWidth",
     orient: "auto-start-reverse",
   });
   marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill }));
@@ -381,13 +386,17 @@ function renderConvoyArrow(unit, draft) {
 }
 
 function appendOrderArrow(group, points, className, markerId) {
-  const pathData = arrowPath(points);
-  if (!pathData) {
+  const geometry = arrowGeometry(points);
+  if (!geometry) {
     return;
   }
 
-  group.append(svg("path", { class: `order-arrow underlay ${className}`, d: pathData }));
-  group.append(svg("path", { class: `order-arrow ${className}`, d: pathData, "marker-end": `url(#${markerId})` }));
+  group.append(svg("path", { class: `order-arrow ${className}`, d: geometry.shaftPath }));
+  group.append(svg("path", {
+    class: `order-arrow-marker ${className}`,
+    d: geometry.markerPath,
+    "marker-end": `url(#${markerId})`,
+  }));
 }
 
 function renderOwnershipRegion(province) {
@@ -496,12 +505,34 @@ function locationAnchor(locationId) {
   return positionForLocation(locationId, location?.province);
 }
 
-function arrowPath(points) {
-  const uniquePoints = points.filter((point, index) => {
-    const previous = points[index - 1];
-    return !previous || distance(previous, point) > 1;
-  });
+function arrowGeometry(points) {
+  const uniquePoints = uniqueArrowPoints(points);
+  if (uniquePoints.length < 2) {
+    return undefined;
+  }
 
+  const end = uniquePoints[uniquePoints.length - 1];
+  const previous = uniquePoints[uniquePoints.length - 2];
+  const finalSegmentLength = distance(previous, end);
+  if (finalSegmentLength <= 1) {
+    return undefined;
+  }
+
+  const shortening = Math.min(orderArrowShaftShortening, finalSegmentLength * 0.45);
+  const finalSegmentX = (end[0] - previous[0]) / finalSegmentLength;
+  const finalSegmentY = (end[1] - previous[1]) / finalSegmentLength;
+  const headBase = [
+    end[0] - finalSegmentX * shortening,
+    end[1] - finalSegmentY * shortening,
+  ];
+  const shaftPath = arrowPath([...uniquePoints.slice(0, -1), headBase]);
+  const markerPath = arrowPath([headBase, end]);
+
+  return shaftPath && markerPath ? { shaftPath, markerPath } : undefined;
+}
+
+function arrowPath(points) {
+  const uniquePoints = uniqueArrowPoints(points);
   if (uniquePoints.length < 2) {
     return undefined;
   }
@@ -509,6 +540,13 @@ function arrowPath(points) {
   return uniquePoints
     .map((point, index) => `${index === 0 ? "M" : "L"} ${formatCoordinate(point[0])} ${formatCoordinate(point[1])}`)
     .join(" ");
+}
+
+function uniqueArrowPoints(points) {
+  return points.filter((point, index) => {
+    const previous = points[index - 1];
+    return !previous || distance(previous, point) > 1;
+  });
 }
 
 function distance(left, right) {
