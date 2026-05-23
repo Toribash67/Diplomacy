@@ -288,6 +288,7 @@ The current web prototype can also be built as a static container. The Docker im
 The rules engine is now stable enough to start a local frontend. The next milestone should be a playable classic-map prototype, not a backend service.
 
 Status: a first dependency-free browser prototype exists in `packages/web`. It renders the Classic 1901 initial board from `classic1901.initialState`, uses separate render metadata in `mapData.js`, and can show province details, starting units, supply ownership, and an adjacency overlay.
+Order entry currently covers movement, support, convoy, retreat, disband, and winter build phases.
 
 Recommended order:
 
@@ -310,10 +311,8 @@ Recommended order:
    - Add enough visual state for selected units, legal-looking destinations, contested areas, and dislodged units.
 
 4. Build order entry
-   - Start with hold and move.
-   - Add support and convoy once selection flows are clear.
-   - Add retreat and build screens after movement orders work.
-   - Let the engine remain authoritative; frontend validation should help the user but not replace adjudication.
+   - Done for hold, move, support, convoy, retreat, disband, and build orders.
+   - Keep the engine authoritative; frontend validation should help the user but not replace adjudication.
 
 5. Wire phase adjudication
    - Keep a local in-memory `GameState`.

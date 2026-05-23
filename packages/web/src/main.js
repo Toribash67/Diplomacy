@@ -45,6 +45,8 @@ let lastResult = undefined;
 let lastOrderUnitLabels = new Map();
 let selectedProvinceId = "par";
 let draftOrders = new Map();
+let retreatDrafts = new Map();
+let buildDrafts = new Map();
 let landProvinceOwners = landProvinceOwnersFromUnits(state.units);
 let provinceGeometry = new Map();
 let provinceLabelPositions = new Map();
@@ -520,6 +522,7 @@ function formatCoordinate(value) {
 function renderSelection() {
   const province = provinceById.get(selectedProvinceId);
   const units = unitsInProvince(selectedProvinceId);
+  const retreatingUnits = retreatsFromProvince(selectedProvinceId);
   const ownerId = state.supplyCenterOwners[selectedProvinceId];
   const locations = classic1901.locations.filter((location) => location.province === selectedProvinceId);
   const locationNames = locations.map((location) => location.id.toUpperCase()).join(", ");
@@ -530,7 +533,7 @@ function renderSelection() {
   selection.append(element("div", { className: "meta-row", textContent: `Locations: ${locationNames}` }));
   selection.append(element("div", { className: "meta-row", textContent: `Supply: ${province.supplyCenter ? ownerName(ownerId) : "No"}` }));
 
-  if (units.length === 0) {
+  if (units.length === 0 && retreatingUnits.length === 0) {
     selection.append(element("div", { className: "empty-row", textContent: "No unit present." }));
   }
 
@@ -542,6 +545,14 @@ function renderSelection() {
     row.append(element("span", { textContent: `${power.name} ${unit.type} at ${location.id.toUpperCase()}` }));
     selection.append(row);
   }
+
+  for (const retreat of retreatingUnits) {
+    const power = powerById.get(retreat.unit.power);
+    const row = element("div", { className: "unit-row retreating" });
+    row.append(element("span", { className: "swatch", style: `background:${powerColors[retreat.unit.power]}` }));
+    row.append(element("span", { textContent: `${power.name} ${retreat.unit.type} dislodged from ${String(retreat.from).toUpperCase()}` }));
+    selection.append(row);
+  }
 }
 
 function renderOrders() {
@@ -549,24 +560,12 @@ function renderOrders() {
   submitOrdersButton.disabled = false;
 
   if (state.phase.type === "retreat") {
-    orderList.append(element("p", {
-      className: "hint",
-      textContent: "Retreat phase: the prototype will disband pending retreats when you submit.",
-    }));
-    for (const retreat of state.retreats ?? []) {
-      const row = element("div", { className: "order-row compact" });
-      row.append(element("span", { className: "order-unit", textContent: unitLabel(retreat.unit) }));
-      row.append(element("span", { className: "order-summary", textContent: "disband" }));
-      orderList.append(row);
-    }
+    renderRetreatOrders();
     return;
   }
 
   if (state.phase.type === "build") {
-    orderList.append(element("p", {
-      className: "hint",
-      textContent: "Build phase: submit with no orders to advance for now.",
-    }));
+    renderBuildOrders();
     return;
   }
 
@@ -688,6 +687,134 @@ function renderOrders() {
   }
 }
 
+function renderRetreatOrders() {
+  const retreats = sortedRetreats(state.retreats ?? []);
+
+  if (retreats.length === 0) {
+    orderList.append(element("p", {
+      className: "hint",
+      textContent: "No retreats are pending. Submit to advance.",
+    }));
+    return;
+  }
+
+  for (const retreat of retreats) {
+    const currentDraft = normalizedRetreatDraft(retreat, retreatDrafts.get(retreat.unit.id));
+    const row = element("div", { className: "order-row" });
+    const unitButton = element("button", { className: "order-unit", type: "button", textContent: unitLabel(retreat.unit) });
+    unitButton.addEventListener("click", () => selectProvince(locationProvince(retreat.from)));
+
+    const action = element("select", { className: "order-select" });
+    if (retreat.options.length > 0) {
+      action.append(option("retreat", "Retreat", currentDraft.type === "retreat"));
+    }
+    action.append(option("disband", "Disband", currentDraft.type === "disband"));
+    action.addEventListener("change", () => {
+      retreatDrafts.set(retreat.unit.id, defaultRetreatDraftForAction(retreat, action.value));
+      renderOrders();
+    });
+
+    let destinationField = emptyOrderField();
+    if (currentDraft.type === "retreat") {
+      const destination = element("select", { className: "order-select" });
+      for (const location of retreatDestinations(retreat)) {
+        destination.append(option(location.id, destinationLabel(location), currentDraft.to === location.id));
+      }
+      destination.addEventListener("change", () => {
+        retreatDrafts.set(retreat.unit.id, { type: "retreat", to: destination.value });
+        renderOrders();
+      });
+      destinationField = destination;
+    }
+
+    row.append(unitButton, action, destinationField, emptyOrderField());
+    orderList.append(row);
+  }
+}
+
+function renderBuildOrders() {
+  const normalizedDrafts = normalizedBuildDrafts();
+  const adjustments = powerAdjustments();
+  const activeAdjustments = adjustments.filter((adjustment) => adjustment.adjustment !== 0);
+
+  if (activeAdjustments.length === 0) {
+    orderList.append(element("p", {
+      className: "hint",
+      textContent: "No builds or disbands are required. Submit to advance.",
+    }));
+    return;
+  }
+
+  for (const adjustment of activeAdjustments) {
+    const requiredRows = Math.abs(adjustment.adjustment);
+    for (let index = 0; index < requiredRows; index += 1) {
+      if (adjustment.adjustment > 0) {
+        orderList.append(renderBuildRow(adjustment.power, index, normalizedDrafts));
+      } else {
+        orderList.append(renderDisbandRow(adjustment.power, index, normalizedDrafts));
+      }
+    }
+  }
+}
+
+function renderBuildRow(power, index, normalizedDrafts) {
+  const key = buildRowKey(power.id, index);
+  const currentDraft = normalizedDrafts.get(key);
+  const rowOptions = availableBuildOptionsForRow(power.id, normalizedDrafts, key);
+  const row = element("div", { className: "order-row" });
+  row.append(element("div", { className: "order-unit order-static", textContent: `${power.name} build ${index + 1}` }));
+
+  const action = element("select", { className: "order-select" });
+  if (rowOptions.length > 0) {
+    action.append(option("build", "Build", currentDraft.type === "build"));
+  }
+  action.append(option("waive", "Waive", currentDraft.type === "waive"));
+  action.addEventListener("change", () => {
+    buildDrafts.set(key, defaultBuildDraftForAction(power.id, action.value, normalizedDrafts, key));
+    renderOrders();
+  });
+
+  let buildField = emptyOrderField();
+  if (currentDraft.type === "build") {
+    const buildOption = element("select", { className: "order-select" });
+    for (const candidate of rowOptions) {
+      buildOption.append(option(buildOptionKey(candidate), buildOptionLabel(candidate), buildOptionMatchesDraft(candidate, currentDraft)));
+    }
+    buildOption.addEventListener("change", () => {
+      const nextOption = rowOptions.find((candidate) => buildOptionKey(candidate) === buildOption.value);
+      buildDrafts.set(key, nextOption ? buildDraftFromOption(nextOption) : { type: "waive" });
+      renderOrders();
+    });
+    buildField = buildOption;
+  }
+
+  row.append(action, buildField, emptyOrderField());
+  return row;
+}
+
+function renderDisbandRow(power, index, normalizedDrafts) {
+  const key = buildRowKey(power.id, index);
+  const currentDraft = normalizedDrafts.get(key);
+  const row = element("div", { className: "order-row" });
+  row.append(element("div", { className: "order-unit order-static", textContent: `${power.name} disband ${index + 1}` }));
+  const action = element("select", { className: "order-select", disabled: true });
+  action.append(option("disband", "Disband", true));
+  row.append(action);
+
+  const units = availableDisbandUnitsForRow(power.id, normalizedDrafts, key);
+  const unitField = element("select", { className: "order-select" });
+  for (const unit of units) {
+    unitField.append(option(unit.id, unitLabel(unit), currentDraft?.unitId === unit.id));
+  }
+  unitField.addEventListener("change", () => {
+    buildDrafts.set(key, { type: "disband", unitId: unitField.value });
+    renderOrders();
+  });
+
+  row.append(unitField, emptyOrderField());
+  return row;
+}
+
 function renderResults() {
   resultList.replaceChildren();
 
@@ -698,7 +825,7 @@ function renderResults() {
 
   const summary = element("div", {
     className: "result-summary",
-    textContent: `${Object.values(lastResult.orderResults).length} orders resolved. ${lastResult.retreats.length} retreats pending.`,
+    textContent: `${Object.values(lastResult.orderResults).length} orders resolved. Next: ${formatPhase(lastResult.nextState.phase)}${lastResult.retreats.length > 0 ? ` with ${lastResult.retreats.length} retreats pending` : ""}.`,
   });
   resultList.append(summary);
 
@@ -808,12 +935,15 @@ function setImpassableBackground(document) {
 }
 
 function submitOrders() {
-  lastOrderUnitLabels = new Map(state.units.map((unit) => [unit.id, unitLabel(unit)]));
+  lastOrderUnitLabels = new Map([
+    ...state.units,
+    ...(state.retreats ?? []).map((retreat) => retreat.unit),
+  ].map((unit) => [unit.id, unitLabel(unit)]));
   const orders = state.phase.type === "movement"
     ? buildMovementOrders()
     : state.phase.type === "retreat"
       ? buildRetreatOrders()
-      : [];
+      : buildBuildOrders();
 
   lastResult = adjudicate(state, orders, classic1901);
   state = cloneState(lastResult.nextState);
@@ -822,9 +952,11 @@ function submitOrders() {
     ...landProvinceOwnersFromUnits(state.units),
   };
   draftOrders = new Map();
+  retreatDrafts = new Map();
+  buildDrafts = new Map();
 
-  if (!provinceById.has(selectedProvinceId) || unitsInProvince(selectedProvinceId).length === 0) {
-    selectedProvinceId = state.units[0] ? locationById.get(state.units[0].location).province : "par";
+  if (!provinceById.has(selectedProvinceId) || (unitsInProvince(selectedProvinceId).length === 0 && retreatsFromProvince(selectedProvinceId).length === 0)) {
+    selectedProvinceId = defaultSelectedProvinceId();
   }
 
   render();
@@ -858,11 +990,241 @@ function buildMovementOrders() {
 }
 
 function buildRetreatOrders() {
-  return (state.retreats ?? []).map((retreat, index) => ({
-    id: `retreat:${state.phase.year}:${state.phase.season}:${index}:${retreat.unit.id}`,
-    type: "disband",
-    unitId: retreat.unit.id,
+  return sortedRetreats(state.retreats ?? []).map((retreat, index) => {
+    const draft = normalizedRetreatDraft(retreat, retreatDrafts.get(retreat.unit.id));
+    const id = `retreat:${state.phase.year}:${state.phase.season}:${index}:${retreat.unit.id}`;
+    return draft.type === "retreat"
+      ? { id, type: "retreat", unitId: retreat.unit.id, to: draft.to }
+      : { id, type: "disband", unitId: retreat.unit.id };
+  });
+}
+
+function buildBuildOrders() {
+  const normalizedDrafts = normalizedBuildDrafts();
+  const orders = [];
+
+  for (const adjustment of powerAdjustments()) {
+    const requiredRows = Math.abs(adjustment.adjustment);
+    for (let index = 0; index < requiredRows; index += 1) {
+      const key = buildRowKey(adjustment.power.id, index);
+      const draft = normalizedDrafts.get(key);
+
+      if (draft?.type === "build") {
+        orders.push({
+          id: `build:${state.phase.year}:${index}:${adjustment.power.id}:${draft.unitType}:${draft.location}`,
+          type: "build",
+          power: adjustment.power.id,
+          unitId: `${adjustment.power.id}-build-${state.phase.year}-${index}-${draft.unitType[0]}-${draft.location}`,
+          unitType: draft.unitType,
+          location: draft.location,
+        });
+      }
+
+      if (draft?.type === "disband") {
+        orders.push({
+          id: `disband:${state.phase.year}:${index}:${draft.unitId}`,
+          type: "disband",
+          unitId: draft.unitId,
+        });
+      }
+    }
+  }
+
+  return orders;
+}
+
+function sortedRetreats(retreats) {
+  return [...retreats].sort((left, right) => unitLabel(left.unit).localeCompare(unitLabel(right.unit)));
+}
+
+function retreatDestinations(retreat) {
+  return retreat.options
+    .map((locationId) => locationById.get(locationId))
+    .filter(Boolean)
+    .sort((left, right) => destinationLabel(left).localeCompare(destinationLabel(right)));
+}
+
+function normalizedRetreatDraft(retreat, draft) {
+  if (draft?.type === "disband" || retreat.options.length === 0) {
+    return { type: "disband" };
+  }
+
+  if (draft?.type === "retreat" && retreat.options.includes(draft.to)) {
+    return draft;
+  }
+
+  const destination = retreatDestinations(retreat)[0];
+  return destination ? { type: "retreat", to: destination.id } : { type: "disband" };
+}
+
+function defaultRetreatDraftForAction(retreat, action) {
+  if (action === "retreat" && retreat.options.length > 0) {
+    const destination = retreatDestinations(retreat)[0];
+    return destination ? { type: "retreat", to: destination.id } : { type: "disband" };
+  }
+
+  return { type: "disband" };
+}
+
+function normalizedBuildDrafts() {
+  const normalizedDrafts = new Map();
+  const selectedBuildProvinces = new Set();
+  const selectedDisbandUnitIds = new Set();
+
+  for (const adjustment of powerAdjustments()) {
+    const requiredRows = Math.abs(adjustment.adjustment);
+
+    if (adjustment.adjustment > 0) {
+      const options = buildOptionsForPower(adjustment.power.id);
+      for (let index = 0; index < requiredRows; index += 1) {
+        const key = buildRowKey(adjustment.power.id, index);
+        const draft = buildDrafts.get(key);
+        let normalizedDraft = { type: "waive" };
+
+        if (draft?.type === "build") {
+          const selectedOption = options.find((candidate) => {
+            return buildOptionMatchesDraft(candidate, draft) && !selectedBuildProvinces.has(candidate.province);
+          });
+          if (selectedOption) {
+            normalizedDraft = buildDraftFromOption(selectedOption);
+          }
+        }
+
+        if (normalizedDraft.type !== "build" && draft?.type !== "waive") {
+          const fallbackOption = options.find((candidate) => !selectedBuildProvinces.has(candidate.province));
+          if (fallbackOption) {
+            normalizedDraft = buildDraftFromOption(fallbackOption);
+          }
+        }
+
+        if (normalizedDraft.type === "build") {
+          selectedBuildProvinces.add(normalizedDraft.province);
+        }
+        normalizedDrafts.set(key, normalizedDraft);
+      }
+    } else if (adjustment.adjustment < 0) {
+      const units = sortedUnits(state.units.filter((unit) => unit.power === adjustment.power.id));
+      for (let index = 0; index < requiredRows; index += 1) {
+        const key = buildRowKey(adjustment.power.id, index);
+        const draft = buildDrafts.get(key);
+        let selectedUnit = draft?.type === "disband"
+          ? units.find((unit) => unit.id === draft.unitId && !selectedDisbandUnitIds.has(unit.id))
+          : undefined;
+
+        if (!selectedUnit) {
+          selectedUnit = units.find((unit) => !selectedDisbandUnitIds.has(unit.id));
+        }
+
+        if (selectedUnit) {
+          selectedDisbandUnitIds.add(selectedUnit.id);
+          normalizedDrafts.set(key, { type: "disband", unitId: selectedUnit.id });
+        }
+      }
+    }
+  }
+
+  return normalizedDrafts;
+}
+
+function buildRowKey(powerId, index) {
+  return `${powerId}:${index}`;
+}
+
+function powerAdjustments() {
+  return classic1901.powers.map((power) => ({
+    power,
+    supplyCenters: countSupplyCenters(power.id),
+    units: countPowerUnits(power.id),
+    adjustment: countSupplyCenters(power.id) - countPowerUnits(power.id),
   }));
+}
+
+function countSupplyCenters(powerId) {
+  return Object.values(state.supplyCenterOwners).filter((owner) => owner === powerId).length;
+}
+
+function countPowerUnits(powerId) {
+  return state.units.filter((unit) => unit.power === powerId).length;
+}
+
+function buildOptionsForPower(powerId) {
+  const occupied = occupiedProvinces();
+  return classic1901.locations
+    .flatMap((location) => {
+      const province = provinceById.get(location.province);
+      if (
+        !province?.supplyCenter ||
+        province.supplyCenter.homePower !== powerId ||
+        state.supplyCenterOwners[province.id] !== powerId ||
+        occupied.has(province.id)
+      ) {
+        return [];
+      }
+
+      return location.unitTypes.map((unitType) => ({
+        power: powerId,
+        unitType,
+        location: location.id,
+        province: province.id,
+      }));
+    })
+    .sort((left, right) => buildOptionLabel(left).localeCompare(buildOptionLabel(right)));
+}
+
+function occupiedProvinces() {
+  return new Set(state.units.map((unit) => locationProvince(unit.location)));
+}
+
+function availableBuildOptionsForRow(powerId, normalizedDrafts, key) {
+  const usedProvinces = new Set();
+  for (const [rowKey, draft] of normalizedDrafts) {
+    if (rowKey !== key && draft.type === "build") {
+      usedProvinces.add(draft.province);
+    }
+  }
+
+  return buildOptionsForPower(powerId).filter((candidate) => !usedProvinces.has(candidate.province));
+}
+
+function defaultBuildDraftForAction(powerId, action, normalizedDrafts, key) {
+  if (action !== "build") {
+    return { type: "waive" };
+  }
+
+  const option = availableBuildOptionsForRow(powerId, normalizedDrafts, key)[0];
+  return option ? buildDraftFromOption(option) : { type: "waive" };
+}
+
+function buildDraftFromOption(option) {
+  return {
+    type: "build",
+    unitType: option.unitType,
+    location: option.location,
+    province: option.province,
+  };
+}
+
+function buildOptionMatchesDraft(option, draft) {
+  return option.unitType === draft.unitType && option.location === draft.location;
+}
+
+function buildOptionKey(option) {
+  return `${option.unitType}:${option.location}`;
+}
+
+function buildOptionLabel(option) {
+  return `${unitTypeAbbreviation(option.unitType)} ${String(option.location).toUpperCase()}`;
+}
+
+function availableDisbandUnitsForRow(powerId, normalizedDrafts, key) {
+  const selectedUnitIds = new Set();
+  for (const [rowKey, draft] of normalizedDrafts) {
+    if (rowKey !== key && draft.type === "disband") {
+      selectedUnitIds.add(draft.unitId);
+    }
+  }
+
+  return sortedUnits(state.units.filter((unit) => unit.power === powerId && !selectedUnitIds.has(unit.id)));
 }
 
 function legalDestinations(unit) {
@@ -1182,6 +1544,8 @@ function resetGame() {
   lastResult = undefined;
   lastOrderUnitLabels = new Map();
   draftOrders = new Map();
+  retreatDrafts = new Map();
+  buildDrafts = new Map();
   landProvinceOwners = landProvinceOwnersFromUnits(state.units);
   selectedProvinceId = "par";
   render();
@@ -1189,6 +1553,19 @@ function resetGame() {
 
 function unitsInProvince(provinceId) {
   return state.units.filter((unit) => locationById.get(unit.location)?.province === provinceId);
+}
+
+function retreatsFromProvince(provinceId) {
+  return (state.retreats ?? []).filter((retreat) => locationProvince(retreat.from) === provinceId);
+}
+
+function defaultSelectedProvinceId() {
+  const retreat = state.retreats?.[0];
+  if (retreat) {
+    return locationProvince(retreat.from);
+  }
+
+  return state.units[0] ? locationById.get(state.units[0].location).province : "par";
 }
 
 function landProvinceOwnersFromUnits(units) {
@@ -1211,6 +1588,10 @@ function destinationLabel(location) {
   return location.id.toUpperCase();
 }
 
+function unitTypeAbbreviation(unitType) {
+  return unitType === "army" ? "A" : "F";
+}
+
 function orderResultText(result) {
   if (result.order.type === "move") {
     const convoyText = result.order.viaConvoy ? " via convoy" : "";
@@ -1228,6 +1609,14 @@ function orderResultText(result) {
 
   if (result.order.type === "disband") {
     return `${unitName(result.order.unitId)} disband`;
+  }
+
+  if (result.order.type === "retreat") {
+    return `${unitName(result.order.unitId)} retreat -> ${String(result.order.to).toUpperCase()}`;
+  }
+
+  if (result.order.type === "build") {
+    return `${ownerName(result.order.power)} build ${unitTypeAbbreviation(result.order.unitType)} ${String(result.order.location).toUpperCase()}`;
   }
 
   return `${unitName(result.order.unitId)} hold`;

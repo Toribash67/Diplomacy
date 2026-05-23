@@ -397,6 +397,11 @@ h2 {
   white-space: nowrap;
 }
 
+.order-unit.order-static {
+  display: flex;
+  align-items: center;
+}
+
 .order-summary {
   color: #53606a;
 }
@@ -409,6 +414,12 @@ h2 {
   background: #ffffff;
   color: #1f282f;
   padding: 0 6px;
+}
+
+.order-select:disabled {
+  background: #eef1f2;
+  color: #7a858e;
+  opacity: 1;
 }
 
 .order-field.empty {
