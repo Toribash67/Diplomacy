@@ -224,6 +224,11 @@ h2 {
   stroke-width: 2.2;
 }
 
+.province.order-source.order-drafting .province-hit {
+  stroke-dasharray: 5 3;
+  stroke-width: 2.4;
+}
+
 .province.order-target .province-hit {
   fill: rgba(17, 24, 32, 0.12);
   stroke: #111820;
@@ -363,18 +368,24 @@ h2 {
 }
 
 .map-order-button {
+  appearance: none;
   min-height: 38px;
   border: 1px solid #cbd3d8;
   border-radius: 6px;
   background: #ffffff;
   color: #26323a;
   font-weight: 700;
+  box-shadow: 0 1px 0 rgba(16, 24, 32, 0.08);
 }
 
-.map-order-button.active {
-  border-color: #2f6f7e;
-  background: #e2f0f2;
-  color: #245964;
+.map-order-button.active,
+.map-order-button[aria-pressed="true"] {
+  border-color: #143f49;
+  background: #245f6b;
+  color: #ffffff;
+  box-shadow:
+    inset 0 2px 5px rgba(16, 24, 32, 0.32),
+    0 0 0 2px rgba(47, 111, 126, 0.22);
 }
 
 .primary-button,

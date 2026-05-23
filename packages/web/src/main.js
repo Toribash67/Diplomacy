@@ -576,6 +576,9 @@ function mapOrderProvinceClass(provinceId) {
 
   if (locationProvince(unit.location) === provinceId) {
     classes.push("order-source");
+    if (mapOrderIntent?.unitId === unit.id) {
+      classes.push("order-drafting");
+    }
   }
 
   for (const targetProvince of [...mapOrderTargetProvinces(draft), ...mapOrderIntentProvinces()]) {
@@ -794,12 +797,14 @@ function renderMapOrderControls() {
 
   const unit = mapOrderControlUnit();
   for (const action of ["hold", "move", "support", "convoy"]) {
+    const active = activeMapOrderAction(unit) === action;
     const button = element("button", {
-      className: `map-order-button ${activeMapOrderAction(unit) === action ? "active" : ""}`,
+      className: `map-order-button ${active ? "active" : ""}`,
       disabled: !unit || !mapOrderActionAvailable(unit, action),
       type: "button",
       textContent: mapOrderActionLabel(action),
     });
+    button.setAttribute("aria-pressed", active ? "true" : "false");
     button.addEventListener("click", () => startMapOrderAction(action));
     mapOrderControls.append(button);
   }
