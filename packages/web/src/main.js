@@ -25,6 +25,7 @@ const selection = document.querySelector("#selection");
 const powerList = document.querySelector("#powerList");
 const phaseLabel = document.querySelector("#phaseLabel");
 const orderList = document.querySelector("#orderList");
+const mapOrderControls = document.querySelector("#mapOrderControls");
 const resultList = document.querySelector("#resultList");
 const submitOrdersButton = document.querySelector("#submitOrders");
 const resetGameButton = document.querySelector("#resetGame");
@@ -50,6 +51,8 @@ let lastResult = undefined;
 let lastOrderUnitLabels = new Map();
 let selectedProvinceId = "par";
 let draftOrders = new Map();
+let mapOrderUnitId = undefined;
+let mapOrderIntent = undefined;
 let retreatDrafts = new Map();
 let buildDrafts = new Map();
 let landProvinceOwners = landProvinceOwnersFromUnits(state.units);
@@ -261,6 +264,7 @@ async function loadProvinceGeometry() {
 function render() {
   phaseLabel.textContent = formatPhase(state.phase);
   renderBoard();
+  renderMapOrderControls();
   renderSelection();
   renderOrders();
   renderResults();
@@ -436,7 +440,7 @@ function renderProvinceTarget(province) {
   const radius = province.type === "sea" ? 13 : 11;
   const paths = provinceGeometry.get(province.id) ?? [];
   const group = svg("g", {
-    class: `province ${province.type} ${province.id === selectedProvinceId ? "selected" : ""}`,
+    class: `province ${province.type} ${mapOrderProvinceClass(province.id)} ${province.id === selectedProvinceId ? "selected" : ""}`,
     tabindex: 0,
     role: "button",
     "aria-label": province.name,
@@ -557,6 +561,66 @@ function formatCoordinate(value) {
   return Number.parseFloat(value.toFixed(2));
 }
 
+function mapOrderProvinceClass(provinceId) {
+  if (state.phase.type !== "movement") {
+    return "";
+  }
+
+  const unit = currentMapOrderUnit();
+  if (!unit) {
+    return "";
+  }
+
+  const draft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
+  const classes = [];
+
+  if (locationProvince(unit.location) === provinceId) {
+    classes.push("order-source");
+  }
+
+  for (const targetProvince of [...mapOrderTargetProvinces(draft), ...mapOrderIntentProvinces()]) {
+    if (targetProvince === provinceId) {
+      classes.push("order-target");
+    }
+  }
+
+  return classes.join(" ");
+}
+
+function mapOrderTargetProvinces(draft) {
+  if ((draft.type === "move" || draft.type === "move-via-convoy") && draft.to) {
+    return [locationProvince(draft.to)];
+  }
+
+  if (draft.type === "support" && draft.supportedUnitId) {
+    const supportedUnit = state.units.find((candidate) => candidate.id === draft.supportedUnitId);
+    return [
+      supportedUnit ? locationProvince(supportedUnit.location) : undefined,
+      draft.to ? locationProvince(draft.to) : undefined,
+    ].filter(Boolean);
+  }
+
+  if (draft.type === "convoy" && draft.convoyedUnitId) {
+    const convoyedUnit = state.units.find((candidate) => candidate.id === draft.convoyedUnitId);
+    return [
+      convoyedUnit ? locationProvince(convoyedUnit.location) : undefined,
+      draft.to ? locationProvince(draft.to) : undefined,
+    ].filter(Boolean);
+  }
+
+  return [];
+}
+
+function mapOrderIntentProvinces() {
+  if (!mapOrderIntent) {
+    return [];
+  }
+
+  const targetUnitId = mapOrderIntent.supportedUnitId ?? mapOrderIntent.convoyedUnitId;
+  const targetUnit = state.units.find((unit) => unit.id === targetUnitId);
+  return targetUnit ? [locationProvince(targetUnit.location)] : [];
+}
+
 function renderSelection() {
   const province = provinceById.get(selectedProvinceId);
   const units = unitsInProvince(selectedProvinceId);
@@ -611,7 +675,7 @@ function renderOrders() {
     const currentDraft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
     const row = element("div", { className: "order-row" });
     const unitButton = element("button", { className: "order-unit", type: "button", textContent: unitLabel(unit) });
-    unitButton.addEventListener("click", () => selectProvince(locationById.get(unit.location).province));
+    unitButton.addEventListener("click", () => selectMapOrderUnit(unit.id));
 
     const action = element("select", { className: "order-select" });
     action.append(option("hold", "Hold", currentDraft.type === "hold"));
@@ -723,6 +787,84 @@ function renderOrders() {
     row.append(unitButton, action, firstField, secondField);
     orderList.append(row);
   }
+}
+
+function renderMapOrderControls() {
+  mapOrderControls.replaceChildren();
+
+  const unit = mapOrderControlUnit();
+  for (const action of ["hold", "move", "support", "convoy"]) {
+    const button = element("button", {
+      className: `map-order-button ${activeMapOrderAction(unit) === action ? "active" : ""}`,
+      disabled: !unit || !mapOrderActionAvailable(unit, action),
+      type: "button",
+      textContent: mapOrderActionLabel(action),
+    });
+    button.addEventListener("click", () => startMapOrderAction(action));
+    mapOrderControls.append(button);
+  }
+}
+
+function mapOrderControlUnit() {
+  if (state.phase.type !== "movement") {
+    return undefined;
+  }
+
+  if (mapOrderIntent) {
+    return state.units.find((unit) => unit.id === mapOrderIntent.unitId);
+  }
+
+  return unitsInProvince(selectedProvinceId)[0];
+}
+
+function activeMapOrderAction(unit) {
+  if (!unit || mapOrderIntent?.unitId !== unit.id) {
+    return undefined;
+  }
+
+  return mapOrderIntent.action;
+}
+
+function mapOrderActionAvailable(unit, action) {
+  if (action === "hold") {
+    return true;
+  }
+
+  if (action === "move") {
+    return legalDestinations(unit).length > 0 || convoyDestinationsForArmy(unit).length > 0;
+  }
+
+  if (action === "support") {
+    return supportOptionsForUnit(unit).length > 0;
+  }
+
+  if (action === "convoy") {
+    return convoyOptionsForFleet(unit).length > 0;
+  }
+
+  return false;
+}
+
+function mapOrderActionLabel(action) {
+  return action === "hold" ? "Hold" : capitalize(action);
+}
+
+function startMapOrderAction(action) {
+  const unit = mapOrderControlUnit();
+  if (!unit || !mapOrderActionAvailable(unit, action)) {
+    return;
+  }
+
+  mapOrderUnitId = unit.id;
+
+  if (action === "hold") {
+    draftOrders.set(unit.id, { type: "hold" });
+    mapOrderIntent = undefined;
+  } else {
+    mapOrderIntent = { action, unitId: unit.id };
+  }
+
+  render();
 }
 
 function renderRetreatOrders() {
@@ -990,6 +1132,8 @@ function submitOrders() {
     ...landProvinceOwnersFromUnits(state.units),
   };
   draftOrders = new Map();
+  mapOrderUnitId = undefined;
+  mapOrderIntent = undefined;
   retreatDrafts = new Map();
   buildDrafts = new Map();
 
@@ -1263,6 +1407,156 @@ function availableDisbandUnitsForRow(powerId, normalizedDrafts, key) {
   }
 
   return sortedUnits(state.units.filter((unit) => unit.power === powerId && !selectedUnitIds.has(unit.id)));
+}
+
+function currentMapOrderUnit() {
+  if (mapOrderIntent) {
+    return state.units.find((unit) => unit.id === mapOrderIntent.unitId);
+  }
+
+  return unitsInProvince(selectedProvinceId)[0]
+    ?? state.units.find((unit) => unit.id === mapOrderUnitId);
+}
+
+function selectMapOrderUnit(unitId) {
+  const unit = state.units.find((candidate) => candidate.id === unitId);
+  if (!unit) {
+    return;
+  }
+
+  mapOrderUnitId = unit.id;
+  mapOrderIntent = undefined;
+  selectedProvinceId = locationProvince(unit.location);
+  render();
+}
+
+function handleMapOrderProvinceSelection(provinceId) {
+  if (state.phase.type !== "movement" || !mapOrderIntent) {
+    return false;
+  }
+
+  const unit = state.units.find((candidate) => candidate.id === mapOrderIntent.unitId);
+  if (!unit) {
+    mapOrderIntent = undefined;
+    return false;
+  }
+
+  mapOrderUnitId = unit.id;
+
+  if (mapOrderIntent.action === "move") {
+    return completeMapMoveOrder(unit, provinceId);
+  }
+
+  if (mapOrderIntent.action === "support") {
+    return mapOrderIntent.supportedUnitId
+      ? completeMapSupportOrder(unit, provinceId)
+      : setMapSupportUnit(unit, provinceId);
+  }
+
+  if (mapOrderIntent.action === "convoy") {
+    return mapOrderIntent.convoyedUnitId
+      ? completeMapConvoyOrder(unit, provinceId)
+      : setMapConvoyedUnit(unit, provinceId);
+  }
+
+  return false;
+}
+
+function completeMapMoveOrder(unit, provinceId) {
+  const directDestination = locationFromProvince(legalDestinations(unit), provinceId);
+  const convoyDestination = locationFromProvince(convoyDestinationsForArmy(unit), provinceId);
+  const destination = directDestination ?? convoyDestination;
+  if (!destination) {
+    return false;
+  }
+
+  draftOrders.set(unit.id, directDestination
+    ? { type: "move", to: destination.id }
+    : { type: "move-via-convoy", to: destination.id });
+  mapOrderIntent = undefined;
+  return true;
+}
+
+function setMapSupportUnit(unit, provinceId) {
+  const provinceUnits = unitsInProvince(provinceId);
+  const selectedOption = supportOptionsForUnit(unit)
+    .find((option) => provinceUnits.some((candidate) => candidate.id === option.unit.id));
+  if (!selectedOption) {
+    return false;
+  }
+
+  mapOrderIntent = {
+    action: "support",
+    unitId: unit.id,
+    supportedUnitId: selectedOption.unit.id,
+  };
+  return true;
+}
+
+function completeMapSupportOrder(unit, provinceId) {
+  const supportedUnit = state.units.find((candidate) => candidate.id === mapOrderIntent?.supportedUnitId);
+  if (!supportedUnit) {
+    return false;
+  }
+
+  const targets = supportTargetsForUnit(unit, supportedUnit);
+  const target = targets.find((candidate) => candidate.to && locationProvince(candidate.to) === provinceId)
+    ?? targets.find((candidate) => !candidate.to && locationProvince(supportedUnit.location) === provinceId);
+  if (!target) {
+    return false;
+  }
+
+  draftOrders.set(unit.id, supportDraft(supportedUnit, target));
+  alignSupportedUnitDraft(supportedUnit, target);
+  mapOrderIntent = undefined;
+  return true;
+}
+
+function setMapConvoyedUnit(unit, provinceId) {
+  const provinceUnits = unitsInProvince(provinceId);
+  const selectedOption = convoyOptionsForFleet(unit)
+    .find((option) => provinceUnits.some((candidate) => candidate.id === option.army.id));
+  if (!selectedOption) {
+    return false;
+  }
+
+  mapOrderIntent = {
+    action: "convoy",
+    unitId: unit.id,
+    convoyedUnitId: selectedOption.army.id,
+  };
+  return true;
+}
+
+function completeMapConvoyOrder(unit, provinceId) {
+  const convoyOptions = convoyOptionsForFleet(unit);
+  const selectedOption = convoyOptions.find((option) => option.army.id === mapOrderIntent?.convoyedUnitId);
+  const destination = locationFromProvince(selectedOption?.destinations ?? [], provinceId);
+  if (!selectedOption || !destination) {
+    return false;
+  }
+
+  setConvoyDraftForOption(unit, selectedOption, destination.id);
+  mapOrderIntent = undefined;
+  return true;
+}
+
+function setConvoyDraftForOption(unit, convoyOption, destinationId) {
+  if (!convoyOption || !destinationId) {
+    draftOrders.set(unit.id, { type: "hold" });
+    return;
+  }
+
+  draftOrders.set(unit.id, {
+    type: "convoy",
+    convoyedUnitId: convoyOption.army.id,
+    to: destinationId,
+  });
+  draftOrders.set(convoyOption.army.id, { type: "move-via-convoy", to: destinationId });
+}
+
+function locationFromProvince(locations, provinceId) {
+  return locations.find((location) => location.province === provinceId);
 }
 
 function legalDestinations(unit) {
@@ -1573,7 +1867,14 @@ function locationProvince(locationId) {
 }
 
 function selectProvince(provinceId) {
+  handleMapOrderProvinceSelection(provinceId);
   selectedProvinceId = provinceId;
+  if (state.phase.type === "movement" && !mapOrderIntent) {
+    const unit = unitsInProvince(provinceId)[0];
+    if (unit) {
+      mapOrderUnitId = unit.id;
+    }
+  }
   render();
 }
 
@@ -1582,6 +1883,8 @@ function resetGame() {
   lastResult = undefined;
   lastOrderUnitLabels = new Map();
   draftOrders = new Map();
+  mapOrderUnitId = undefined;
+  mapOrderIntent = undefined;
   retreatDrafts = new Map();
   buildDrafts = new Map();
   landProvinceOwners = landProvinceOwnersFromUnits(state.units);

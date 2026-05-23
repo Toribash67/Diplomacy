@@ -24,6 +24,7 @@ Current scope:
 - inspect provinces, supply ownership, locations, and starting units
 - render split-coast fleets at location-specific anchors
 - submit hold, adjacent move, support, and convoy orders for all powers
+- draft movement, support, and convoy orders with board-level buttons and map-selected targets
 - submit retreat, disband, and build orders through engine phase progression
 - preview draft move, support, and convoy orders with map arrows
 
