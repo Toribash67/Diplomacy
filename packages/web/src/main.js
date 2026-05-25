@@ -41,6 +41,13 @@ const resultList = document.querySelector("#resultList");
 const submitOrdersButton = document.querySelector("#submitOrders");
 const resetGameButton = document.querySelector("#resetGame");
 const labelsToggle = document.querySelector("#labelsToggle");
+const shadowToggle = document.querySelector("#shadowToggle");
+const themeSelect = document.querySelector("#themeSelect");
+const conqueredBuildsToggle = document.querySelector("#conqueredBuildsToggle");
+const scConversionsToggle = document.querySelector("#scConversionsToggle");
+const settingsMenu = document.querySelector(".settings-menu");
+const settingsToggle = document.querySelector("#settingsToggle");
+const settingsPanel = document.querySelector("#settingsPanel");
 const zoomMapInButton = document.querySelector("#zoomMapIn");
 const zoomMapOutButton = document.querySelector("#zoomMapOut");
 const resetMapViewButton = document.querySelector("#resetMapView");
@@ -96,6 +103,13 @@ const {
 });
 
 labelsToggle.addEventListener("change", render);
+shadowToggle.addEventListener("change", renderBoard);
+themeSelect.addEventListener("change", applyTheme);
+conqueredBuildsToggle.addEventListener("change", handleRuleSettingsChange);
+scConversionsToggle.addEventListener("change", handleRuleSettingsChange);
+settingsToggle.addEventListener("click", toggleSettingsPanel);
+document.addEventListener("click", closeSettingsPanelOnOutsideClick);
+document.addEventListener("keydown", closeSettingsPanelOnEscape);
 submitOrdersButton.addEventListener("click", submitOrders);
 resetGameButton.addEventListener("click", resetGame);
 
@@ -114,6 +128,7 @@ const mapViewport = initializeMapViewport({
 });
 
 loadProvinceGeometry();
+applyTheme();
 render();
 
 async function loadProvinceGeometry() {
@@ -176,7 +191,7 @@ function renderMapDefs() {
 }
 
 function renderLandWaterShadow() {
-  if (!landWaterShadowImageUrl) {
+  if (!shadowToggle.checked || !landWaterShadowImageUrl) {
     return svg("g", { class: "map-land-shadow", "aria-hidden": "true" });
   }
 
@@ -263,6 +278,66 @@ function renderLandMaskCanvas(waterMask) {
 
 function rgba([red, green, blue], alpha) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function toggleSettingsPanel(event) {
+  event.stopPropagation();
+  setSettingsPanelOpen(settingsPanel.hidden);
+}
+
+function closeSettingsPanelOnOutsideClick(event) {
+  if (settingsPanel.hidden || (event.target instanceof Node && settingsMenu.contains(event.target))) {
+    return;
+  }
+
+  setSettingsPanelOpen(false);
+}
+
+function closeSettingsPanelOnEscape(event) {
+  if (event.key !== "Escape" || settingsPanel.hidden) {
+    return;
+  }
+
+  setSettingsPanelOpen(false);
+  settingsToggle.focus();
+}
+
+function setSettingsPanelOpen(isOpen) {
+  settingsPanel.hidden = !isOpen;
+  settingsToggle.setAttribute("aria-expanded", String(isOpen));
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = themeSelect.value;
+}
+
+function handleRuleSettingsChange() {
+  buildDrafts = new Map();
+  renderOrders();
+}
+
+function variantForCurrentSettings() {
+  if (state.phase.type !== "build" || !conqueredBuildsToggle.checked) {
+    return classic1901;
+  }
+
+  return {
+    ...classic1901,
+    provinces: classic1901.provinces.map((province) => {
+      if (!province.supplyCenter) {
+        return province;
+      }
+
+      const owner = state.supplyCenterOwners[province.id];
+      return {
+        ...province,
+        supplyCenter: {
+          ...province.supplyCenter,
+          homePower: owner ?? province.supplyCenter.homePower,
+        },
+      };
+    }),
+  };
 }
 
 function renderArrowMarker(id, fill, size) {
@@ -826,8 +901,9 @@ function renderBuildOrders() {
   const normalizedDrafts = normalizedBuildDrafts();
   const adjustments = powerAdjustments();
   const activeAdjustments = adjustments.filter((adjustment) => adjustment.adjustment !== 0);
+  const conversionRows = conversionRowsForPowers(adjustments);
 
-  if (activeAdjustments.length === 0) {
+  if (activeAdjustments.length === 0 && conversionRows.length === 0) {
     orderList.append(element("p", {
       className: "hint",
       textContent: "No builds or disbands are required. Submit to advance.",
@@ -844,6 +920,10 @@ function renderBuildOrders() {
         orderList.append(renderDisbandRow(adjustment.power, index, normalizedDrafts));
       }
     }
+  }
+
+  for (const { power, index } of conversionRows) {
+    orderList.append(renderConversionRow(power, index, normalizedDrafts));
   }
 }
 
@@ -906,6 +986,39 @@ function renderDisbandRow(power, index, normalizedDrafts) {
   return row;
 }
 
+function renderConversionRow(power, index, normalizedDrafts) {
+  const key = conversionRowKey(power.id, index);
+  const currentDraft = normalizedDrafts.get(key);
+  const rowOptions = conversionOptionsForPower(power.id);
+  const row = element("div", { className: "order-row" });
+  row.append(orderPowerStaticField(power.id, `Convert ${index + 1}`));
+
+  const action = element("select", { className: "order-select" });
+  action.append(option("waive", "Waive", currentDraft.type === "waive"));
+  action.append(option("convert", "Convert", currentDraft.type === "convert"));
+  action.addEventListener("change", () => {
+    buildDrafts.set(key, defaultConversionDraftForAction(power.id, action.value, normalizedDrafts, key));
+    renderOrders();
+  });
+
+  let conversionField = emptyOrderField();
+  if (currentDraft.type === "convert") {
+    const conversionOption = orderPowerSelect(power.id, "Conversion");
+    for (const candidate of rowOptions) {
+      conversionOption.append(option(conversionOptionKey(candidate), conversionOptionLabel(candidate), conversionOptionMatchesDraft(candidate, currentDraft)));
+    }
+    conversionOption.addEventListener("change", () => {
+      const nextOption = rowOptions.find((candidate) => conversionOptionKey(candidate) === conversionOption.value);
+      buildDrafts.set(key, nextOption ? conversionDraftFromOption(nextOption) : { type: "waive" });
+      renderOrders();
+    });
+    conversionField = conversionOption;
+  }
+
+  row.append(action, conversionField, emptyOrderField());
+  return row;
+}
+
 function renderResults() {
   resultList.replaceChildren();
 
@@ -954,7 +1067,12 @@ function submitOrders() {
       ? buildRetreatOrders()
       : buildBuildOrders();
 
-  lastResult = adjudicate(state, orders, classic1901);
+  const conversionOrders = orders.filter((order) => order.type === "convert");
+  const adjudicationOrders = orders.filter((order) => order.type !== "convert");
+  lastResult = adjudicate(state, adjudicationOrders, variantForCurrentSettings());
+  if (conversionOrders.length > 0) {
+    lastResult = applyConversionOrders(lastResult, conversionOrders);
+  }
   state = cloneState(lastResult.nextState);
   landProvinceOwners = {
     ...landProvinceOwners,
@@ -971,6 +1089,70 @@ function submitOrders() {
   }
 
   render();
+}
+
+function applyConversionOrders(result, conversionOrders) {
+  const orderResults = { ...result.orderResults };
+  const nextUnits = [...result.nextState.units];
+  const convertedUnitIds = new Set();
+
+  for (const order of conversionOrders) {
+    const unitIndex = nextUnits.findIndex((unit) => unit.id === order.unitId);
+    const unit = nextUnits[unitIndex];
+    const destination = locationById.get(order.location);
+    const provinceId = destination?.province;
+    const province = provinceId ? provinceById.get(provinceId) : undefined;
+
+    let error = undefined;
+    if (!scConversionsToggle.checked) {
+      error = "Unit conversion is not enabled.";
+    } else if (!unit) {
+      error = "Conversion order references a unit that is not in the current state.";
+    } else if (convertedUnitIds.has(order.unitId)) {
+      error = "Only one conversion may be ordered for a unit.";
+    } else if (!destination || !province) {
+      error = "Conversion destination is unknown.";
+    } else if (locationProvince(unit.location) !== provinceId) {
+      error = "Conversion must stay in the unit's current supply center.";
+    } else if (!province.supplyCenter || state.supplyCenterOwners[provinceId] !== unit.power) {
+      error = "Conversion location is not an owned supply center.";
+    } else if (!destination.unitTypes.includes(order.unitType)) {
+      error = "Converted unit type cannot occupy that location.";
+    } else if (unit.type === order.unitType) {
+      error = "Conversion must change the unit type.";
+    }
+
+    if (error) {
+      orderResults[order.id] = {
+        order,
+        status: "invalid",
+        reason: error,
+      };
+      continue;
+    }
+
+    convertedUnitIds.add(order.unitId);
+    nextUnits[unitIndex] = {
+      ...unit,
+      type: order.unitType,
+      location: order.location,
+    };
+    orderResults[order.id] = {
+      order,
+      status: "succeeds",
+      reason: "Unit converted in an owned supply center.",
+    };
+  }
+
+  return {
+    ...result,
+    nextState: {
+      ...result.nextState,
+      units: nextUnits,
+    },
+    orderResults,
+    invalidOrders: Object.values(orderResults).filter((orderResult) => orderResult.status === "invalid"),
+  };
 }
 
 function buildMovementOrders() {
@@ -1039,6 +1221,24 @@ function buildBuildOrders() {
         });
       }
     }
+
+    if (adjustment.adjustment >= 0 && scConversionsToggle.checked) {
+      const requiredConversionRows = conversionRowCountForPower(adjustment.power.id);
+      for (let index = 0; index < requiredConversionRows; index += 1) {
+        const key = conversionRowKey(adjustment.power.id, index);
+        const draft = normalizedDrafts.get(key);
+        if (draft?.type === "convert") {
+          orders.push({
+            id: `convert:${state.phase.year}:${index}:${draft.unitId}:${draft.unitType}:${draft.location}`,
+            type: "convert",
+            power: adjustment.power.id,
+            unitId: draft.unitId,
+            unitType: draft.unitType,
+            location: draft.location,
+          });
+        }
+      }
+    }
   }
 
   return orders;
@@ -1081,6 +1281,7 @@ function normalizedBuildDrafts() {
   const normalizedDrafts = new Map();
   const selectedBuildProvinces = new Set();
   const selectedDisbandUnitIds = new Set();
+  const selectedConversionUnitIds = new Set();
 
   for (const adjustment of powerAdjustments()) {
     const requiredRows = Math.abs(adjustment.adjustment);
@@ -1132,6 +1333,30 @@ function normalizedBuildDrafts() {
         }
       }
     }
+
+    if (adjustment.adjustment >= 0 && scConversionsToggle.checked) {
+      const options = conversionOptionsForPower(adjustment.power.id);
+      const requiredConversionRows = conversionRowCountForPower(adjustment.power.id);
+      for (let index = 0; index < requiredConversionRows; index += 1) {
+        const key = conversionRowKey(adjustment.power.id, index);
+        const draft = buildDrafts.get(key);
+        let normalizedDraft = { type: "waive" };
+
+        if (draft?.type === "convert") {
+          const selectedOption = options.find((candidate) => {
+            return conversionOptionMatchesDraft(candidate, draft) && !selectedConversionUnitIds.has(candidate.unitId);
+          });
+          if (selectedOption) {
+            normalizedDraft = conversionDraftFromOption(selectedOption);
+          }
+        }
+
+        if (normalizedDraft.type === "convert") {
+          selectedConversionUnitIds.add(normalizedDraft.unitId);
+        }
+        normalizedDrafts.set(key, normalizedDraft);
+      }
+    }
   }
 
   return normalizedDrafts;
@@ -1139,6 +1364,10 @@ function normalizedBuildDrafts() {
 
 function buildRowKey(powerId, index) {
   return `${powerId}:${index}`;
+}
+
+function conversionRowKey(powerId, index) {
+  return `${powerId}:convert:${index}`;
 }
 
 function powerAdjustments() {
@@ -1165,7 +1394,7 @@ function buildOptionsForPower(powerId) {
       const province = provinceById.get(location.province);
       if (
         !province?.supplyCenter ||
-        province.supplyCenter.homePower !== powerId ||
+        (!conqueredBuildsToggle.checked && province.supplyCenter.homePower !== powerId) ||
         state.supplyCenterOwners[province.id] !== powerId ||
         occupied.has(province.id)
       ) {
@@ -1180,6 +1409,56 @@ function buildOptionsForPower(powerId) {
       }));
     })
     .sort((left, right) => buildOptionLabel(left).localeCompare(buildOptionLabel(right)));
+}
+
+function conversionRowsForPowers(adjustments) {
+  if (!scConversionsToggle.checked) {
+    return [];
+  }
+
+  return adjustments.flatMap((adjustment) => {
+    if (adjustment.adjustment < 0) {
+      return [];
+    }
+
+    return Array.from({ length: conversionRowCountForPower(adjustment.power.id) }, (_, index) => ({
+      power: adjustment.power,
+      index,
+    }));
+  });
+}
+
+function conversionRowCountForPower(powerId) {
+  return new Set(conversionOptionsForPower(powerId).map((option) => option.unitId)).size;
+}
+
+function conversionOptionsForPower(powerId) {
+  if (!scConversionsToggle.checked) {
+    return [];
+  }
+
+  return sortedUnits(state.units.filter((unit) => unit.power === powerId))
+    .flatMap((unit) => {
+      const provinceId = locationProvince(unit.location);
+      const province = provinceById.get(provinceId);
+      if (!province?.supplyCenter || state.supplyCenterOwners[provinceId] !== powerId) {
+        return [];
+      }
+
+      return classic1901.locations
+        .filter((location) => location.province === provinceId)
+        .flatMap((location) => location.unitTypes
+          .filter((unitType) => unitType !== unit.type)
+          .map((unitType) => ({
+            power: powerId,
+            unitId: unit.id,
+            from: unit.location,
+            unitType,
+            location: location.id,
+            province: provinceId,
+          })));
+    })
+    .sort((left, right) => conversionOptionLabel(left).localeCompare(conversionOptionLabel(right)));
 }
 
 function occupiedProvinces() {
@@ -1225,6 +1504,47 @@ function buildOptionKey(option) {
 
 function buildOptionLabel(option) {
   return `${unitTypeAbbreviation(option.unitType)} ${String(option.location).toUpperCase()}`;
+}
+
+function defaultConversionDraftForAction(powerId, action, normalizedDrafts, key) {
+  if (action !== "convert") {
+    return { type: "waive" };
+  }
+
+  const selectedUnitIds = new Set();
+  for (const [rowKey, draft] of normalizedDrafts) {
+    if (rowKey !== key && draft.type === "convert") {
+      selectedUnitIds.add(draft.unitId);
+    }
+  }
+
+  const option = conversionOptionsForPower(powerId).find((candidate) => !selectedUnitIds.has(candidate.unitId));
+  return option ? conversionDraftFromOption(option) : { type: "waive" };
+}
+
+function conversionDraftFromOption(option) {
+  return {
+    type: "convert",
+    power: option.power,
+    unitId: option.unitId,
+    unitType: option.unitType,
+    location: option.location,
+    province: option.province,
+  };
+}
+
+function conversionOptionMatchesDraft(option, draft) {
+  return option.unitId === draft.unitId && option.unitType === draft.unitType && option.location === draft.location;
+}
+
+function conversionOptionKey(option) {
+  return `${option.unitId}:${option.unitType}:${option.location}`;
+}
+
+function conversionOptionLabel(option) {
+  const unit = state.units.find((candidate) => candidate.id === option.unitId);
+  const from = unit ? unitLabel(unit) : String(option.from).toUpperCase();
+  return `${from} to ${unitTypeAbbreviation(option.unitType)} ${String(option.location).toUpperCase()}`;
 }
 
 function availableDisbandUnitsForRow(powerId, normalizedDrafts, key) {
@@ -1587,6 +1907,10 @@ function orderResultText(result) {
 
   if (result.order.type === "build") {
     return `${ownerName(result.order.power)} build ${unitTypeAbbreviation(result.order.unitType)} ${String(result.order.location).toUpperCase()}`;
+  }
+
+  if (result.order.type === "convert") {
+    return `${unitName(result.order.unitId)} convert to ${unitTypeAbbreviation(result.order.unitType)} ${String(result.order.location).toUpperCase()}`;
   }
 
   return `${unitName(result.order.unitId)} hold`;

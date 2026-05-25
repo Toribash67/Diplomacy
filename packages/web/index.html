@@ -14,11 +14,52 @@
             <h1>Classic 1901</h1>
             <p id="phaseLabel"></p>
           </div>
-          <div class="toolbar" aria-label="Map layers">
-            <label class="toggle">
-              <input id="labelsToggle" type="checkbox" checked>
-              <span>Labels</span>
-            </label>
+          <div class="toolbar" aria-label="Board controls">
+            <div class="settings-menu">
+              <button
+                id="settingsToggle"
+                class="settings-button"
+                type="button"
+                aria-label="Open settings"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="settingsPanel"
+              >
+                Settings
+              </button>
+              <div id="settingsPanel" class="settings-panel" role="dialog" aria-label="Settings" hidden>
+                <h2>Settings</h2>
+                <section class="settings-group" aria-labelledby="cosmeticSettingsHeading">
+                  <h3 id="cosmeticSettingsHeading">Cosmetic</h3>
+                  <label class="settings-row">
+                    <span>Coast shadow</span>
+                    <input id="shadowToggle" type="checkbox" checked>
+                  </label>
+                  <label class="settings-row">
+                    <span>Labels</span>
+                    <input id="labelsToggle" type="checkbox" checked>
+                  </label>
+                  <label class="settings-row settings-row-select">
+                    <span>Theme</span>
+                    <select id="themeSelect">
+                      <option value="light" selected>Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </label>
+                </section>
+                <section class="settings-group" aria-labelledby="gameSettingsHeading">
+                  <h3 id="gameSettingsHeading">Game Rules</h3>
+                  <label class="settings-row">
+                    <span>Build in conquered SCs</span>
+                    <input id="conqueredBuildsToggle" type="checkbox">
+                  </label>
+                  <label class="settings-row">
+                    <span>Convert units in SCs</span>
+                    <input id="scConversionsToggle" type="checkbox">
+                  </label>
+                </section>
+              </div>
+            </div>
           </div>
         </header>
         <div class="map-frame">
