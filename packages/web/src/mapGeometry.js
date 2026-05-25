@@ -1,8 +1,9 @@
-export async function loadMapGeometry({ mapImageUrl, provinceLabelIds }) {
+export async function loadMapGeometry({ mapImageUrl, provinceLabelIds, seaProvinceIds = [] }) {
   const response = await fetch(mapImageUrl);
   const svgText = await response.text();
   const mapDocument = new DOMParser().parseFromString(svgText, "image/svg+xml");
   const labelToProvince = new Map(Object.entries(provinceLabelIds).map(([provinceId, labelId]) => [labelId, provinceId]));
+  const seaProvinces = new Set(seaProvinceIds);
   const provinceGeometry = new Map();
   const provinceLabelPositions = new Map();
   const supplyCenterPositions = new Map();
@@ -28,6 +29,7 @@ export async function loadMapGeometry({ mapImageUrl, provinceLabelIds }) {
   }
 
   addExtraProvincePaths(mapDocument, provinceGeometry, provinceLabelIds);
+  const waterPaths = waterPathsForShadow(mapDocument, provinceGeometry, labelToProvince, seaProvinces);
   setImpassableBackground(mapDocument);
   removeEmbeddedMapOverlays(mapDocument);
 
@@ -36,6 +38,7 @@ export async function loadMapGeometry({ mapImageUrl, provinceLabelIds }) {
     provinceLabelPositions,
     supplyCenterPositions,
     sanitizedMapImageUrl: URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(mapDocument)], { type: "image/svg+xml" })),
+    waterPaths,
   };
 }
 
@@ -113,6 +116,30 @@ function removeEmbeddedMapOverlays(mapDocument) {
     }
     overlay.remove();
   }
+}
+
+function waterPathsForShadow(mapDocument, provinceGeometry, labelToProvince, seaProvinces) {
+  const seaPaths = [...seaProvinces].flatMap((provinceId) => provinceGeometry.get(provinceId) ?? []);
+  const insetWaterPaths = [...mapDocument.querySelectorAll("path.s1")]
+    .filter((path) => !seaProvinces.has(provinceIdForPath(path, labelToProvince)))
+    .map((path) => path.getAttribute("d"))
+    .filter(Boolean);
+
+  return [...seaPaths, ...insetWaterPaths];
+}
+
+function provinceIdForPath(path, labelToProvince) {
+  let group = path.closest("g");
+  while (group) {
+    const label = group.querySelector(":scope > text[id]");
+    const provinceId = label ? labelToProvince.get(label.id) : undefined;
+    if (provinceId) {
+      return provinceId;
+    }
+    group = group.parentElement?.closest("g");
+  }
+
+  return undefined;
 }
 
 function setImpassableBackground(mapDocument) {

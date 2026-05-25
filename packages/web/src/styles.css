@@ -250,6 +250,15 @@ h2 {
   opacity: 0.94;
 }
 
+.map-land-shadow {
+  pointer-events: none;
+}
+
+.map-land-shadow-shape {
+  fill: #000000;
+  stroke: none;
+}
+
 .ownership-region {
   pointer-events: none;
 }
