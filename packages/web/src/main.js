@@ -480,7 +480,7 @@ function renderOrders() {
   for (const unit of sortedUnits(state.units)) {
     const currentDraft = normalizedDraftForUnit(unit, draftOrders.get(unit.id));
     const row = element("div", { className: "order-row" });
-    const unitButton = element("button", { className: "order-unit", type: "button", textContent: unitLabel(unit) });
+    const unitButton = orderUnitButton(unit);
     unitButton.addEventListener("click", () => selectMapOrderUnit(unit.id));
 
     const action = element("select", { className: "order-select" });
@@ -522,9 +522,9 @@ function renderOrders() {
       const selectedOption = convoyOptions.find((candidate) => candidate.army.id === currentDraft.convoyedUnitId)
         ?? convoyOptions[0];
       const destinations = selectedOption?.destinations ?? [];
-      const convoyedUnit = element("select", { className: "order-select" });
+      const convoyedUnit = orderUnitSelect(selectedOption?.army, "Convoyed unit");
       for (const candidate of convoyOptions) {
-        convoyedUnit.append(option(candidate.army.id, unitLabel(candidate.army), selectedOption?.army.id === candidate.army.id));
+        convoyedUnit.append(unitOption(candidate.army, selectedOption?.army.id === candidate.army.id));
       }
       convoyedUnit.addEventListener("change", () => {
         const nextOption = convoyOptions.find((candidate) => candidate.army.id === convoyedUnit.value);
@@ -563,9 +563,9 @@ function renderOrders() {
       const supportTargets = selectedOption?.targets ?? [];
       const selectedTarget = supportTargets.find((target) => targetValue(target) === targetValue(currentDraft))
         ?? defaultSupportTarget(selectedOption?.unit, supportTargets);
-      const supportedUnit = element("select", { className: "order-select" });
+      const supportedUnit = orderUnitSelect(selectedOption?.unit, "Supported unit");
       for (const candidate of supportOptions) {
-        supportedUnit.append(option(candidate.unit.id, unitLabel(candidate.unit), selectedOption?.unit.id === candidate.unit.id));
+        supportedUnit.append(unitOption(candidate.unit, selectedOption?.unit.id === candidate.unit.id));
       }
       supportedUnit.addEventListener("change", () => {
         const nextOption = supportOptions.find((candidate) => candidate.unit.id === supportedUnit.value);
@@ -689,7 +689,7 @@ function renderRetreatOrders() {
   for (const retreat of retreats) {
     const currentDraft = normalizedRetreatDraft(retreat, retreatDrafts.get(retreat.unit.id));
     const row = element("div", { className: "order-row" });
-    const unitButton = element("button", { className: "order-unit", type: "button", textContent: unitLabel(retreat.unit) });
+    const unitButton = orderUnitButton(retreat.unit);
     unitButton.addEventListener("click", () => selectProvince(locationProvince(retreat.from)));
 
     const action = element("select", { className: "order-select" });
@@ -750,7 +750,7 @@ function renderBuildRow(power, index, normalizedDrafts) {
   const currentDraft = normalizedDrafts.get(key);
   const rowOptions = availableBuildOptionsForRow(power.id, normalizedDrafts, key);
   const row = element("div", { className: "order-row" });
-  row.append(element("div", { className: "order-unit order-static", textContent: `${power.name} build ${index + 1}` }));
+  row.append(orderPowerStaticField(power.id, `Build ${index + 1}`));
 
   const action = element("select", { className: "order-select" });
   if (rowOptions.length > 0) {
@@ -764,7 +764,7 @@ function renderBuildRow(power, index, normalizedDrafts) {
 
   let buildField = emptyOrderField();
   if (currentDraft.type === "build") {
-    const buildOption = element("select", { className: "order-select" });
+    const buildOption = orderPowerSelect(power.id, "Build location");
     for (const candidate of rowOptions) {
       buildOption.append(option(buildOptionKey(candidate), buildOptionLabel(candidate), buildOptionMatchesDraft(candidate, currentDraft)));
     }
@@ -784,15 +784,16 @@ function renderDisbandRow(power, index, normalizedDrafts) {
   const key = buildRowKey(power.id, index);
   const currentDraft = normalizedDrafts.get(key);
   const row = element("div", { className: "order-row" });
-  row.append(element("div", { className: "order-unit order-static", textContent: `${power.name} disband ${index + 1}` }));
+  row.append(orderPowerStaticField(power.id, `Disband ${index + 1}`));
   const action = element("select", { className: "order-select", disabled: true });
   action.append(option("disband", "Disband", true));
   row.append(action);
 
   const units = availableDisbandUnitsForRow(power.id, normalizedDrafts, key);
-  const unitField = element("select", { className: "order-select" });
+  const selectedUnit = units.find((unit) => unit.id === currentDraft?.unitId) ?? units[0];
+  const unitField = orderUnitSelect(selectedUnit, "Disband unit");
   for (const unit of units) {
-    unitField.append(option(unit.id, unitLabel(unit), currentDraft?.unitId === unit.id));
+    unitField.append(unitOption(unit, currentDraft?.unitId === unit.id));
   }
   unitField.addEventListener("change", () => {
     buildDrafts.set(key, { type: "disband", unitId: unitField.value });
@@ -1347,6 +1348,66 @@ function sortedUnits(units) {
   return [...units].sort((left, right) => unitLabel(left).localeCompare(unitLabel(right)));
 }
 
+function orderUnitButton(unit) {
+  const node = element("button", {
+    className: `order-unit ${powerFieldClass(unit.power)}`,
+    type: "button",
+    textContent: compactUnitLabel(unit),
+    title: unitLabel(unit),
+    style: powerFieldStyle(unit.power),
+  });
+  node.setAttribute("aria-label", unitLabel(unit));
+  return node;
+}
+
+function orderUnitSelect(unit, label) {
+  const node = element("select", {
+    className: `order-select ${unit ? powerFieldClass(unit.power) : ""}`,
+    style: unit ? powerFieldStyle(unit.power) : "",
+  });
+  if (unit) {
+    node.setAttribute("aria-label", `${label}: ${unitLabel(unit)}`);
+    node.title = unitLabel(unit);
+  }
+  return node;
+}
+
+function orderPowerSelect(powerId, label) {
+  const power = powerById.get(powerId);
+  const node = element("select", {
+    className: `order-select ${powerFieldClass(powerId)}`,
+    style: powerFieldStyle(powerId),
+  });
+  node.setAttribute("aria-label", `${power.name} ${label}`);
+  node.title = power.name;
+  return node;
+}
+
+function orderPowerStaticField(powerId, textContent) {
+  const power = powerById.get(powerId);
+  const node = element("div", {
+    className: `order-unit order-static ${powerFieldClass(powerId)}`,
+    textContent,
+    title: `${power.name} ${textContent.toLowerCase()}`,
+    style: powerFieldStyle(powerId),
+  });
+  node.setAttribute("aria-label", `${power.name} ${textContent}`);
+  return node;
+}
+
+function unitOption(unit, selected) {
+  const node = option(unit.id, compactUnitLabel(unit), selected);
+  node.title = unitLabel(unit);
+  node.setAttribute("aria-label", unitLabel(unit));
+  node.setAttribute("style", powerOptionStyle(unit.power));
+  return node;
+}
+
+function compactUnitLabel(unit) {
+  const location = locationById.get(unit.location);
+  return `${unitTypeAbbreviation(unit.type)} ${location.id.toUpperCase()}`;
+}
+
 function unitLabel(unit) {
   const power = powerById.get(unit.power);
   const location = locationById.get(unit.location);
@@ -1359,6 +1420,44 @@ function destinationLabel(location) {
 
 function unitTypeAbbreviation(unitType) {
   return unitType === "army" ? "A" : "F";
+}
+
+function powerFieldClass(powerId) {
+  return `order-power-field ${powerTextColor(powerId) === "#ffffff" ? "dark" : "light"}`;
+}
+
+function powerFieldStyle(powerId) {
+  return `--order-power-bg:${powerColors[powerId]};--order-power-fg:${powerTextColor(powerId)};`;
+}
+
+function powerOptionStyle(powerId) {
+  return `background-color:${powerColors[powerId]};color:${powerTextColor(powerId)};`;
+}
+
+function powerTextColor(powerId) {
+  const { r, g, b } = hexColorToRgb(powerColors[powerId]);
+  const luminance = relativeLuminance(r, g, b);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  return blackContrast >= whiteContrast ? "#111820" : "#ffffff";
+}
+
+function hexColorToRgb(value) {
+  const hex = value.replace("#", "");
+  const numeric = Number.parseInt(hex, 16);
+  return {
+    r: (numeric >> 16) & 255,
+    g: (numeric >> 8) & 255,
+    b: numeric & 255,
+  };
+}
+
+function relativeLuminance(r, g, b) {
+  const [red, green, blue] = [r, g, b].map((channel) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
 function orderResultText(result) {
