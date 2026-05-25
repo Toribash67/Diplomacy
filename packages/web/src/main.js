@@ -24,9 +24,12 @@ const orderArrowStrokeWidth = 2.25;
 const orderArrowHeadScale = 5.6;
 const orderArrowHeadLength = orderArrowStrokeWidth * orderArrowHeadScale;
 const orderArrowShaftShortening = orderArrowHeadLength * 0.42;
-const landWaterShadowFilterId = "land-water-shadow-filter";
-const landWaterShadowMaskId = "land-water-shadow-water-mask";
-const landWaterShadowMargin = 28;
+const landWaterShadowColor = [23, 55, 68];
+const landWaterShadowLayers = [
+  { blur: 9.5, opacity: 0.38 },
+  { blur: 3.8, opacity: 0.58 },
+  { blur: 1.2, opacity: 0.34 },
+];
 
 const board = document.querySelector("#board");
 const selection = document.querySelector("#selection");
@@ -62,6 +65,7 @@ let provinceGeometry = new Map();
 let provinceLabelPositions = new Map();
 let supplyCenterPositions = new Map();
 let waterPaths = [];
+let landWaterShadowImageUrl = undefined;
 let sanitizedMapImageUrl = mapImageUrl;
 
 const {
@@ -119,6 +123,7 @@ async function loadProvinceGeometry() {
   provinceLabelPositions = geometry.provinceLabelPositions;
   supplyCenterPositions = geometry.supplyCenterPositions;
   waterPaths = geometry.waterPaths;
+  landWaterShadowImageUrl = renderLandWaterShadowImage();
   renderBoard();
 }
 
@@ -165,77 +170,57 @@ function renderBoard() {
 
 function renderMapDefs() {
   const defs = svg("defs");
-  defs.append(renderLandWaterShadowFilter());
-  if (waterPaths.length > 0) {
-    defs.append(renderLandWaterShadowMask());
-  }
   defs.append(renderArrowMarker("order-arrowhead-black", "#111820", orderArrowHeadScale));
   defs.append(renderArrowMarker("order-arrowhead-convoy", "#1f6f9c", orderArrowHeadScale));
   return defs;
 }
 
-function renderLandWaterShadowFilter() {
-  const filter = svg("filter", {
-    id: landWaterShadowFilterId,
-    x: -landWaterShadowMargin,
-    y: -landWaterShadowMargin,
-    width: mapSize.width + landWaterShadowMargin * 2,
-    height: mapSize.height + landWaterShadowMargin * 2,
-    filterUnits: "userSpaceOnUse",
-    "color-interpolation-filters": "sRGB",
-  });
-  filter.append(svg("feMorphology", { in: "SourceAlpha", operator: "dilate", radius: 1.6, result: "spread" }));
-  filter.append(svg("feGaussianBlur", { in: "spread", stdDeviation: 2.2, result: "blur" }));
-  filter.append(svg("feFlood", { "flood-color": "#173744", "flood-opacity": 0.34, result: "shadowColor" }));
-  filter.append(svg("feComposite", { in: "shadowColor", in2: "blur", operator: "in" }));
-  return filter;
-}
-
-function renderLandWaterShadowMask() {
-  const mask = svg("mask", {
-    id: landWaterShadowMaskId,
-    x: -landWaterShadowMargin,
-    y: -landWaterShadowMargin,
-    width: mapSize.width + landWaterShadowMargin * 2,
-    height: mapSize.height + landWaterShadowMargin * 2,
-    maskUnits: "userSpaceOnUse",
-  });
-  mask.append(svg("rect", {
-    x: -landWaterShadowMargin,
-    y: -landWaterShadowMargin,
-    width: mapSize.width + landWaterShadowMargin * 2,
-    height: mapSize.height + landWaterShadowMargin * 2,
-    fill: "#000000",
-  }));
-  for (const path of waterPaths) {
-    mask.append(svg("path", {
-      d: path,
-      fill: "#ffffff",
-      "fill-rule": "evenodd",
-    }));
-  }
-  return mask;
-}
-
 function renderLandWaterShadow() {
-  if (waterPaths.length === 0) {
+  if (!landWaterShadowImageUrl) {
     return svg("g", { class: "map-land-shadow", "aria-hidden": "true" });
   }
 
-  const group = svg("g", {
+  return svg("image", {
     class: "map-land-shadow",
-    filter: `url(#${landWaterShadowFilterId})`,
-    mask: `url(#${landWaterShadowMaskId})`,
+    href: landWaterShadowImageUrl,
+    x: 0,
+    y: 0,
+    width: mapSize.width,
+    height: mapSize.height,
+    preserveAspectRatio: "none",
     "aria-hidden": "true",
   });
+}
 
-  group.append(svg("path", {
-    class: "map-land-shadow-shape",
-    d: nonWaterSilhouettePath(),
-    "fill-rule": "evenodd",
-  }));
+function renderLandWaterShadowImage() {
+  if (waterPaths.length === 0 || typeof Path2D === "undefined") {
+    return undefined;
+  }
 
-  return group;
+  const canvas = document.createElement("canvas");
+  canvas.width = mapSize.width;
+  canvas.height = mapSize.height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return undefined;
+  }
+
+  const silhouette = new Path2D(nonWaterSilhouettePath());
+  for (const layer of landWaterShadowLayers) {
+    context.save();
+    context.shadowColor = rgba(landWaterShadowColor, layer.opacity);
+    context.shadowBlur = layer.blur;
+    context.fillStyle = "#000000";
+    context.fill(silhouette, "evenodd");
+    context.restore();
+  }
+
+  context.globalCompositeOperation = "destination-in";
+  context.fillStyle = "#000000";
+  context.fill(waterMaskPath(), "evenodd");
+
+  return canvas.toDataURL("image/png");
 }
 
 function nonWaterSilhouettePath() {
@@ -245,9 +230,17 @@ function nonWaterSilhouettePath() {
   ].join(" ");
 }
 
+function waterMaskPath() {
+  return new Path2D(waterPaths.map(absoluteInitialMove).join(" "));
+}
+
 function absoluteInitialMove(pathData) {
   const number = "[-+]?(?:\\d*\\.\\d+|\\d+)(?:e[-+]?\\d+)?";
   return pathData.replace(new RegExp(`^\\s*[mM]\\s*(${number})[\\s,]+(${number})`, "i"), "M $1 $2");
+}
+
+function rgba([red, green, blue], alpha) {
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function renderArrowMarker(id, fill, size) {

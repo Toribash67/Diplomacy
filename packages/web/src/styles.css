@@ -254,11 +254,6 @@ h2 {
   pointer-events: none;
 }
 
-.map-land-shadow-shape {
-  fill: #000000;
-  stroke: none;
-}
-
 .ownership-region {
   pointer-events: none;
 }
