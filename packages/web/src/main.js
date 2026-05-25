@@ -26,9 +26,9 @@ const orderArrowHeadLength = orderArrowStrokeWidth * orderArrowHeadScale;
 const orderArrowShaftShortening = orderArrowHeadLength * 0.42;
 const landWaterShadowColor = [23, 55, 68];
 const landWaterShadowLayers = [
-  { blur: 9.5, opacity: 0.38 },
-  { blur: 3.8, opacity: 0.58 },
-  { blur: 1.2, opacity: 0.34 },
+  { blur: 12, opacity: 0.48 },
+  { blur: 5, opacity: 0.72 },
+  { blur: 1.6, opacity: 0.52 },
 ];
 
 const board = document.querySelector("#board");
@@ -206,37 +206,59 @@ function renderLandWaterShadowImage() {
     return undefined;
   }
 
-  const silhouette = new Path2D(nonWaterSilhouettePath());
+  const waterMask = renderWaterMaskCanvas();
+  const landMask = waterMask ? renderLandMaskCanvas(waterMask) : undefined;
+  if (!landMask) {
+    return undefined;
+  }
   for (const layer of landWaterShadowLayers) {
     context.save();
     context.shadowColor = rgba(landWaterShadowColor, layer.opacity);
     context.shadowBlur = layer.blur;
-    context.fillStyle = "#000000";
-    context.fill(silhouette, "evenodd");
+    context.drawImage(landMask, 0, 0);
     context.restore();
   }
 
   context.globalCompositeOperation = "destination-in";
-  context.fillStyle = "#000000";
-  context.fill(waterMaskPath(), "evenodd");
+  context.drawImage(waterMask, 0, 0);
 
   return canvas.toDataURL("image/png");
 }
 
-function nonWaterSilhouettePath() {
-  return [
-    `M 0 0 H ${mapSize.width} V ${mapSize.height} H 0 Z`,
-    ...waterPaths.map(absoluteInitialMove),
-  ].join(" ");
+function renderWaterMaskCanvas() {
+  const canvas = document.createElement("canvas");
+  canvas.width = mapSize.width;
+  canvas.height = mapSize.height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return undefined;
+  }
+
+  context.fillStyle = "#000000";
+  for (const path of waterPaths) {
+    context.fill(new Path2D(path), "evenodd");
+  }
+
+  return canvas;
 }
 
-function waterMaskPath() {
-  return new Path2D(waterPaths.map(absoluteInitialMove).join(" "));
-}
+function renderLandMaskCanvas(waterMask) {
+  const canvas = document.createElement("canvas");
+  canvas.width = mapSize.width;
+  canvas.height = mapSize.height;
 
-function absoluteInitialMove(pathData) {
-  const number = "[-+]?(?:\\d*\\.\\d+|\\d+)(?:e[-+]?\\d+)?";
-  return pathData.replace(new RegExp(`^\\s*[mM]\\s*(${number})[\\s,]+(${number})`, "i"), "M $1 $2");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return undefined;
+  }
+
+  context.fillStyle = "#000000";
+  context.fillRect(0, 0, mapSize.width, mapSize.height);
+  context.globalCompositeOperation = "destination-out";
+  context.drawImage(waterMask, 0, 0);
+
+  return canvas;
 }
 
 function rgba([red, green, blue], alpha) {
