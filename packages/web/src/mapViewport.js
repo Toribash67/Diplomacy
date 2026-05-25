@@ -1,15 +1,19 @@
 const defaultOptions = {
   maxZoom: 4.5,
   clickMoveThreshold: 6,
+  buttonZoomFactor: 1.4,
   wheelZoomSensitivity: 0.002,
 };
 
 export function initializeMapViewport({
   board,
+  zoomInButton,
+  zoomOutButton,
   resetButton,
   mapSize,
   maxZoom = defaultOptions.maxZoom,
   clickMoveThreshold = defaultOptions.clickMoveThreshold,
+  buttonZoomFactor = defaultOptions.buttonZoomFactor,
   wheelZoomSensitivity = defaultOptions.wheelZoomSensitivity,
 }) {
   const minimumViewBox = {
@@ -31,6 +35,8 @@ export function initializeMapViewport({
   board.addEventListener("click", onClickCapture, true);
   board.addEventListener("dblclick", onDoubleClick);
   board.addEventListener("wheel", onWheel, { passive: false });
+  zoomInButton?.addEventListener("click", zoomIn);
+  zoomOutButton?.addEventListener("click", zoomOut);
   resetButton?.addEventListener("click", reset);
 
   return {
@@ -127,6 +133,14 @@ export function initializeMapViewport({
     board.classList.remove("map-panning");
   }
 
+  function zoomIn() {
+    zoomTo(currentZoom() * buttonZoomFactor, centerOf(viewBox));
+  }
+
+  function zoomOut() {
+    zoomTo(currentZoom() / buttonZoomFactor, centerOf(viewBox));
+  }
+
   function zoomTo(zoom, anchor = centerOf(viewBox)) {
     const nextZoom = clamp(zoom, 1, maxZoom);
     const nextWidth = mapSize.width / nextZoom;
@@ -163,6 +177,12 @@ export function initializeMapViewport({
       `${formatNumber(viewBox.x)} ${formatNumber(viewBox.y)} ${formatNumber(viewBox.width)} ${formatNumber(viewBox.height)}`,
     );
     board.classList.toggle("map-zoomed", isZoomed());
+    if (zoomInButton) {
+      zoomInButton.disabled = isAtMaxZoom();
+    }
+    if (zoomOutButton) {
+      zoomOutButton.disabled = !isZoomed();
+    }
     if (resetButton) {
       resetButton.hidden = !isZoomed();
     }
@@ -192,6 +212,10 @@ export function initializeMapViewport({
 
   function isZoomed() {
     return currentZoom() > 1.01;
+  }
+
+  function isAtMaxZoom() {
+    return currentZoom() >= maxZoom - 0.01;
   }
 
   function pinchMetrics() {

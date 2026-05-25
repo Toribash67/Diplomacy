@@ -35,6 +35,8 @@ const resultList = document.querySelector("#resultList");
 const submitOrdersButton = document.querySelector("#submitOrders");
 const resetGameButton = document.querySelector("#resetGame");
 const labelsToggle = document.querySelector("#labelsToggle");
+const zoomMapInButton = document.querySelector("#zoomMapIn");
+const zoomMapOutButton = document.querySelector("#zoomMapOut");
 const resetMapViewButton = document.querySelector("#resetMapView");
 
 const provinceById = new Map(classic1901.provinces.map((province) => [province.id, province]));
@@ -96,6 +98,8 @@ initializePaneResizer({
 
 const mapViewport = initializeMapViewport({
   board,
+  zoomInButton: zoomMapInButton,
+  zoomOutButton: zoomMapOutButton,
   resetButton: resetMapViewButton,
   mapSize,
 });

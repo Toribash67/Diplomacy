@@ -22,7 +22,11 @@
           </div>
         </header>
         <div class="map-frame">
-          <button id="resetMapView" class="map-view-reset" type="button" aria-label="Fit map to frame" hidden>Fit</button>
+          <div class="map-view-controls" role="group" aria-label="Map zoom controls">
+            <button id="zoomMapIn" class="map-view-button" type="button" aria-label="Zoom map in">+</button>
+            <button id="zoomMapOut" class="map-view-button" type="button" aria-label="Zoom map out">-</button>
+            <button id="resetMapView" class="map-view-button map-view-fit" type="button" aria-label="Fit map to frame" hidden>Fit</button>
+          </div>
           <svg id="board" viewBox="0 0 1000 720" role="img" aria-labelledby="mapTitle">
             <title id="mapTitle">Classic Diplomacy starting board</title>
           </svg>
