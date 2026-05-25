@@ -929,10 +929,27 @@ function renderBuildOrders() {
 
 function renderBuildRow(power, index, normalizedDrafts) {
   const key = buildRowKey(power.id, index);
+  const savedDraft = buildDrafts.get(key);
   const currentDraft = normalizedDrafts.get(key);
   const rowOptions = availableBuildOptionsForRow(power.id, normalizedDrafts, key);
+  const selectedOption = currentDraft.type === "build"
+    ? rowOptions.find((candidate) => buildOptionMatchesDraft(candidate, currentDraft))
+    : optionForProvince(rowOptions, savedDraft?.province) ?? rowOptions[0];
+  const selectedProvince = selectedOption?.province ?? savedDraft?.province;
   const row = element("div", { className: "order-row" });
-  row.append(orderPowerStaticField(power.id, `Build ${index + 1}`));
+
+  let supplyCenterField = emptyOrderField();
+  if (rowOptions.length > 0) {
+    supplyCenterField = orderPowerSelect(power.id, "Build supply center");
+    for (const candidate of uniqueProvinceOptions(rowOptions)) {
+      supplyCenterField.append(option(candidate.province, provinceShortName(candidate.province), candidate.province === selectedProvince));
+    }
+    supplyCenterField.addEventListener("change", () => {
+      const nextOption = optionForProvince(rowOptions, supplyCenterField.value);
+      buildDrafts.set(key, currentDraft.type === "build" && nextOption ? buildDraftFromOption(nextOption) : { type: "waive", province: supplyCenterField.value });
+      renderOrders();
+    });
+  }
 
   const action = element("select", { className: "order-select" });
   if (rowOptions.length > 0) {
@@ -940,25 +957,27 @@ function renderBuildRow(power, index, normalizedDrafts) {
   }
   action.append(option("waive", "Waive", currentDraft.type === "waive"));
   action.addEventListener("change", () => {
-    buildDrafts.set(key, defaultBuildDraftForAction(power.id, action.value, normalizedDrafts, key));
+    buildDrafts.set(key, defaultBuildDraftForAction(power.id, action.value, normalizedDrafts, key, supplyCenterField.value));
     renderOrders();
   });
 
-  let buildField = emptyOrderField();
-  if (currentDraft.type === "build") {
-    const buildOption = orderPowerSelect(power.id, "Build location");
-    for (const candidate of rowOptions) {
-      buildOption.append(option(buildOptionKey(candidate), buildOptionLabel(candidate), buildOptionMatchesDraft(candidate, currentDraft)));
+  let unitTypeField = emptyOrderField();
+  if (currentDraft.type === "build" && selectedProvince) {
+    const unitTypeOptions = rowOptions.filter((candidate) => candidate.province === selectedProvince);
+    const unitTypeOption = element("select", { className: "order-select" });
+    unitTypeOption.setAttribute("aria-label", `${power.name} build unit type`);
+    for (const candidate of unitTypeOptions) {
+      unitTypeOption.append(option(buildOptionKey(candidate), buildUnitTypeLabel(candidate, unitTypeOptions), buildOptionMatchesDraft(candidate, currentDraft)));
     }
-    buildOption.addEventListener("change", () => {
-      const nextOption = rowOptions.find((candidate) => buildOptionKey(candidate) === buildOption.value);
+    unitTypeOption.addEventListener("change", () => {
+      const nextOption = unitTypeOptions.find((candidate) => buildOptionKey(candidate) === unitTypeOption.value);
       buildDrafts.set(key, nextOption ? buildDraftFromOption(nextOption) : { type: "waive" });
       renderOrders();
     });
-    buildField = buildOption;
+    unitTypeField = unitTypeOption;
   }
 
-  row.append(action, buildField, emptyOrderField());
+  row.append(supplyCenterField, action, unitTypeField, emptyOrderField());
   return row;
 }
 
@@ -988,34 +1007,55 @@ function renderDisbandRow(power, index, normalizedDrafts) {
 
 function renderConversionRow(power, index, normalizedDrafts) {
   const key = conversionRowKey(power.id, index);
+  const savedDraft = buildDrafts.get(key);
   const currentDraft = normalizedDrafts.get(key);
-  const rowOptions = conversionOptionsForPower(power.id);
+  const rowOptions = availableConversionOptionsForRow(power.id, normalizedDrafts, key);
+  const selectedOption = currentDraft.type === "convert"
+    ? rowOptions.find((candidate) => conversionOptionMatchesDraft(candidate, currentDraft))
+    : optionForUnit(rowOptions, savedDraft?.unitId) ?? rowOptions[0];
   const row = element("div", { className: "order-row" });
-  row.append(orderPowerStaticField(power.id, `Convert ${index + 1}`));
+
+  let supplyCenterField = emptyOrderField();
+  if (rowOptions.length > 0) {
+    supplyCenterField = orderPowerSelect(power.id, "Conversion supply center");
+    for (const candidate of uniqueUnitOptions(rowOptions)) {
+      const unit = state.units.find((stateUnit) => stateUnit.id === candidate.unitId);
+      const optionNode = option(candidate.unitId, provinceShortName(candidate.province), candidate.unitId === selectedOption?.unitId);
+      optionNode.title = unit ? unitLabel(unit) : provinceName(candidate.province);
+      supplyCenterField.append(optionNode);
+    }
+    supplyCenterField.addEventListener("change", () => {
+      const nextOption = optionForUnit(rowOptions, supplyCenterField.value);
+      buildDrafts.set(key, currentDraft.type === "convert" && nextOption ? conversionDraftFromOption(nextOption) : { type: "waive", unitId: supplyCenterField.value });
+      renderOrders();
+    });
+  }
 
   const action = element("select", { className: "order-select" });
   action.append(option("waive", "Waive", currentDraft.type === "waive"));
   action.append(option("convert", "Convert", currentDraft.type === "convert"));
   action.addEventListener("change", () => {
-    buildDrafts.set(key, defaultConversionDraftForAction(power.id, action.value, normalizedDrafts, key));
+    buildDrafts.set(key, defaultConversionDraftForAction(power.id, action.value, normalizedDrafts, key, supplyCenterField.value));
     renderOrders();
   });
 
-  let conversionField = emptyOrderField();
-  if (currentDraft.type === "convert") {
-    const conversionOption = orderPowerSelect(power.id, "Conversion");
-    for (const candidate of rowOptions) {
-      conversionOption.append(option(conversionOptionKey(candidate), conversionOptionLabel(candidate), conversionOptionMatchesDraft(candidate, currentDraft)));
+  let unitTypeField = emptyOrderField();
+  if (currentDraft.type === "convert" && selectedOption) {
+    const unitOptions = rowOptions.filter((candidate) => candidate.unitId === selectedOption.unitId);
+    const conversionOption = element("select", { className: "order-select" });
+    conversionOption.setAttribute("aria-label", `${power.name} conversion unit type`);
+    for (const candidate of unitOptions) {
+      conversionOption.append(option(conversionOptionKey(candidate), conversionUnitTypeLabel(candidate, unitOptions), conversionOptionMatchesDraft(candidate, currentDraft)));
     }
     conversionOption.addEventListener("change", () => {
-      const nextOption = rowOptions.find((candidate) => conversionOptionKey(candidate) === conversionOption.value);
+      const nextOption = unitOptions.find((candidate) => conversionOptionKey(candidate) === conversionOption.value);
       buildDrafts.set(key, nextOption ? conversionDraftFromOption(nextOption) : { type: "waive" });
       renderOrders();
     });
-    conversionField = conversionOption;
+    unitTypeField = conversionOption;
   }
 
-  row.append(action, conversionField, emptyOrderField());
+  row.append(supplyCenterField, action, unitTypeField, emptyOrderField());
   return row;
 }
 
@@ -1461,6 +1501,49 @@ function conversionOptionsForPower(powerId) {
     .sort((left, right) => conversionOptionLabel(left).localeCompare(conversionOptionLabel(right)));
 }
 
+function availableConversionOptionsForRow(powerId, normalizedDrafts, key) {
+  const selectedUnitIds = new Set();
+  for (const [rowKey, draft] of normalizedDrafts) {
+    if (rowKey !== key && draft.type === "convert") {
+      selectedUnitIds.add(draft.unitId);
+    }
+  }
+
+  return conversionOptionsForPower(powerId).filter((candidate) => !selectedUnitIds.has(candidate.unitId));
+}
+
+function uniqueProvinceOptions(options) {
+  const seen = new Set();
+  return options.filter((option) => {
+    if (seen.has(option.province)) {
+      return false;
+    }
+
+    seen.add(option.province);
+    return true;
+  });
+}
+
+function uniqueUnitOptions(options) {
+  const seen = new Set();
+  return options.filter((option) => {
+    if (seen.has(option.unitId)) {
+      return false;
+    }
+
+    seen.add(option.unitId);
+    return true;
+  });
+}
+
+function optionForProvince(options, provinceId) {
+  return options.find((option) => option.province === provinceId);
+}
+
+function optionForUnit(options, unitId) {
+  return options.find((option) => option.unitId === unitId);
+}
+
 function occupiedProvinces() {
   return new Set(state.units.map((unit) => locationProvince(unit.location)));
 }
@@ -1476,12 +1559,13 @@ function availableBuildOptionsForRow(powerId, normalizedDrafts, key) {
   return buildOptionsForPower(powerId).filter((candidate) => !usedProvinces.has(candidate.province));
 }
 
-function defaultBuildDraftForAction(powerId, action, normalizedDrafts, key) {
+function defaultBuildDraftForAction(powerId, action, normalizedDrafts, key, preferredProvince) {
   if (action !== "build") {
-    return { type: "waive" };
+    return { type: "waive", province: preferredProvince };
   }
 
-  const option = availableBuildOptionsForRow(powerId, normalizedDrafts, key)[0];
+  const options = availableBuildOptionsForRow(powerId, normalizedDrafts, key);
+  const option = optionForProvince(options, preferredProvince) ?? options[0];
   return option ? buildDraftFromOption(option) : { type: "waive" };
 }
 
@@ -1506,9 +1590,13 @@ function buildOptionLabel(option) {
   return `${unitTypeAbbreviation(option.unitType)} ${String(option.location).toUpperCase()}`;
 }
 
-function defaultConversionDraftForAction(powerId, action, normalizedDrafts, key) {
+function buildUnitTypeLabel(option, options) {
+  return unitTypeSelectionLabel(option, options);
+}
+
+function defaultConversionDraftForAction(powerId, action, normalizedDrafts, key, preferredUnitId) {
   if (action !== "convert") {
-    return { type: "waive" };
+    return { type: "waive", unitId: preferredUnitId };
   }
 
   const selectedUnitIds = new Set();
@@ -1518,7 +1606,8 @@ function defaultConversionDraftForAction(powerId, action, normalizedDrafts, key)
     }
   }
 
-  const option = conversionOptionsForPower(powerId).find((candidate) => !selectedUnitIds.has(candidate.unitId));
+  const options = conversionOptionsForPower(powerId).filter((candidate) => !selectedUnitIds.has(candidate.unitId) || candidate.unitId === preferredUnitId);
+  const option = optionForUnit(options, preferredUnitId) ?? options[0];
   return option ? conversionDraftFromOption(option) : { type: "waive" };
 }
 
@@ -1545,6 +1634,18 @@ function conversionOptionLabel(option) {
   const unit = state.units.find((candidate) => candidate.id === option.unitId);
   const from = unit ? unitLabel(unit) : String(option.from).toUpperCase();
   return `${from} to ${unitTypeAbbreviation(option.unitType)} ${String(option.location).toUpperCase()}`;
+}
+
+function conversionUnitTypeLabel(option, options) {
+  return unitTypeSelectionLabel(option, options);
+}
+
+function unitTypeSelectionLabel(option, options) {
+  const duplicateType = options.some((candidate) => {
+    return candidate !== option && candidate.unitType === option.unitType;
+  });
+  const unitType = option.unitType === "army" ? "Army" : "Fleet";
+  return duplicateType ? `${unitType} ${String(option.location).toUpperCase()}` : unitType;
 }
 
 function availableDisbandUnitsForRow(powerId, normalizedDrafts, key) {
@@ -1838,6 +1939,14 @@ function unitLabel(unit) {
 
 function destinationLabel(location) {
   return location.id.toUpperCase();
+}
+
+function provinceShortName(provinceId) {
+  return String(provinceId).toUpperCase();
+}
+
+function provinceName(provinceId) {
+  return provinceById.get(provinceId)?.name ?? provinceShortName(provinceId);
 }
 
 function unitTypeAbbreviation(unitType) {
