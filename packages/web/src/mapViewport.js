@@ -1,7 +1,6 @@
 const defaultOptions = {
   maxZoom: 4.5,
   clickMoveThreshold: 6,
-  pinchZoomSpeed: 1.65,
   wheelZoomSensitivity: 0.002,
 };
 
@@ -11,7 +10,6 @@ export function initializeMapViewport({
   mapSize,
   maxZoom = defaultOptions.maxZoom,
   clickMoveThreshold = defaultOptions.clickMoveThreshold,
-  pinchZoomSpeed = defaultOptions.pinchZoomSpeed,
   wheelZoomSensitivity = defaultOptions.wheelZoomSensitivity,
 }) {
   const minimumViewBox = {
@@ -21,6 +19,7 @@ export function initializeMapViewport({
   let viewBox = fullViewBox(mapSize);
   let activePointers = new Map();
   let interactionDistance = 0;
+  let gestureActive = false;
   let suppressNextClick = false;
 
   applyViewBox();
@@ -44,11 +43,9 @@ export function initializeMapViewport({
       return;
     }
 
-    board.setPointerCapture?.(event.pointerId);
     activePointers.set(event.pointerId, pointerPosition(event));
     interactionDistance = 0;
     suppressNextClick = false;
-    board.classList.add("map-panning");
   }
 
   function onPointerMove(event) {
@@ -68,16 +65,19 @@ export function initializeMapViewport({
     }
 
     if (activePointers.size >= 2) {
+      activateGesture();
+      suppressNextClick = true;
       const nextMetrics = pinchMetrics();
       if (previousMetrics && nextMetrics && previousMetrics.distance > 0) {
         const anchor = pointForClientPosition(nextMetrics.center);
-        const distanceRatio = nextMetrics.distance / previousMetrics.distance;
-        const zoomFactor = Math.pow(distanceRatio, pinchZoomSpeed);
-        zoomTo(currentZoom() * zoomFactor, anchor);
+        zoomTo(currentZoom() * (nextMetrics.distance / previousMetrics.distance), anchor);
         panBetweenClientPositions(previousMetrics.center, nextMetrics.center);
       }
-    } else if (isZoomed()) {
+    } else if (isZoomed() && (gestureActive || interactionDistance > clickMoveThreshold)) {
+      activateGesture();
       panBetweenClientPositions(previousPosition, pointer);
+    } else {
+      return;
     }
 
     event.preventDefault();
@@ -85,8 +85,9 @@ export function initializeMapViewport({
 
   function onPointerEnd(event) {
     activePointers.delete(event.pointerId);
-    board.releasePointerCapture?.(event.pointerId);
+    releasePointer(event.pointerId);
     if (activePointers.size === 0) {
+      gestureActive = false;
       board.classList.remove("map-panning");
     }
   }
@@ -121,7 +122,9 @@ export function initializeMapViewport({
 
   function reset() {
     setViewBox(fullViewBox(mapSize));
+    gestureActive = false;
     suppressNextClick = false;
+    board.classList.remove("map-panning");
   }
 
   function zoomTo(zoom, anchor = centerOf(viewBox)) {
@@ -204,6 +207,34 @@ export function initializeMapViewport({
       },
       distance: distance(first, second),
     };
+  }
+
+  function activateGesture() {
+    if (gestureActive) {
+      return;
+    }
+
+    gestureActive = true;
+    board.classList.add("map-panning");
+    for (const pointerId of activePointers.keys()) {
+      capturePointer(pointerId);
+    }
+  }
+
+  function capturePointer(pointerId) {
+    try {
+      board.setPointerCapture?.(pointerId);
+    } catch {
+      // Some browsers reject capture if the pointer has already ended.
+    }
+  }
+
+  function releasePointer(pointerId) {
+    try {
+      board.releasePointerCapture?.(pointerId);
+    } catch {
+      // Releasing an uncaptured pointer is harmless.
+    }
   }
 }
 
