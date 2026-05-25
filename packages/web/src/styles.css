@@ -161,6 +161,7 @@ h2 {
 }
 
 .map-frame {
+  position: relative;
   min-height: calc(100vh - 84px);
   min-height: calc(100dvh - 84px);
   border: 1px solid #bdc8ce;
@@ -175,6 +176,41 @@ h2 {
   height: calc(100vh - 84px);
   height: calc(100dvh - 84px);
   min-height: 560px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+#board.map-panning {
+  cursor: grabbing;
+}
+
+.map-view-reset {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 10px;
+  min-height: 32px;
+  border: 1px solid rgba(16, 24, 32, 0.3);
+  border-radius: var(--control-radius);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f282f;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 10px;
+  box-shadow: 0 1px 4px rgba(16, 24, 32, 0.16);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.map-view-reset:hover,
+.map-view-reset:focus-visible {
+  border-color: var(--control-focus);
+  color: #143f49;
+}
+
+.map-view-reset[hidden] {
+  display: none;
 }
 
 .map-water {

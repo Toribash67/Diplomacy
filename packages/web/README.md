@@ -21,6 +21,7 @@ Source layout:
 - `main.js`: app bootstrap, state, and high-level rendering flow
 - `mapData.js`: visual map anchors and label ids
 - `mapGeometry.js`: SVG parsing and province click geometry
+- `mapViewport.js`: in-app map pan and zoom behavior
 - `orderOptions.js`: selectable move, support, and convoy options
 - `arrows.js`: order-arrow geometry
 - `paneResizer.js`: order-panel resize behavior
@@ -33,6 +34,7 @@ Current scope:
 - keep visual map metadata separate from variant rules data
 - inspect provinces, supply ownership, locations, and starting units
 - render split-coast fleets at location-specific anchors
+- pan and zoom the map without browser page zoom
 - submit hold, adjacent move, support, and convoy orders for all powers
 - draft movement, support, and convoy orders with board-level buttons and map-selected targets
 - submit retreat, disband, and build orders through engine phase progression

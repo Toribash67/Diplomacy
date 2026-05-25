@@ -3,6 +3,7 @@ import { mapSize, positionForLocation, positionForProvince, provinceLabelIds, un
 import { arrowGeometry } from "./arrows.js";
 import { element, emptyOrderField, option, svg, text } from "./dom.js";
 import { loadMapGeometry } from "./mapGeometry.js";
+import { initializeMapViewport } from "./mapViewport.js";
 import { createOrderOptions } from "./orderOptions.js";
 import { initializePaneResizer } from "./paneResizer.js";
 import { unitShape } from "./unitShape.js";
@@ -34,6 +35,7 @@ const resultList = document.querySelector("#resultList");
 const submitOrdersButton = document.querySelector("#submitOrders");
 const resetGameButton = document.querySelector("#resetGame");
 const labelsToggle = document.querySelector("#labelsToggle");
+const resetMapViewButton = document.querySelector("#resetMapView");
 
 const provinceById = new Map(classic1901.provinces.map((province) => [province.id, province]));
 const locationById = new Map(classic1901.locations.map((location) => [location.id, location]));
@@ -91,6 +93,13 @@ initializePaneResizer({
   sidePane: document.querySelector("#orderPanel"),
   paneResizer: document.querySelector("#paneResizer"),
 });
+
+const mapViewport = initializeMapViewport({
+  board,
+  resetButton: resetMapViewButton,
+  mapSize,
+});
+
 loadProvinceGeometry();
 render();
 
@@ -114,7 +123,7 @@ function render() {
 }
 
 function renderBoard() {
-  board.setAttribute("viewBox", `0 0 ${mapSize.width} ${mapSize.height}`);
+  mapViewport.applyViewBox();
   board.replaceChildren();
   board.classList.toggle("hide-labels", !labelsToggle.checked);
 
