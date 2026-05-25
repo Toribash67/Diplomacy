@@ -29,8 +29,14 @@ packages/
     index.html
     src/
       main.js
+      arrows.js
+      dom.js
       mapData.js
+      mapGeometry.js
+      orderOptions.js
+      paneResizer.js
       styles.css
+      unitShape.js
 ```
 
 The engine is tested with brewed TypeScript and Node's built-in test runner via:
@@ -44,6 +50,8 @@ The browser prototype is served without package dependencies via:
 ```sh
 make web
 ```
+
+The web package is intentionally split into small dependency-free modules. `main.js` owns bootstrapping, state, and high-level rendering flow. Focused modules own reusable DOM helpers, SVG unit shapes, map SVG parsing, pane resizing, arrow geometry, and order-option calculations.
 
 ## Engine Model
 

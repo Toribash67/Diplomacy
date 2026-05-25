@@ -16,6 +16,16 @@ http://localhost:5173/packages/web/
 
 The app imports the built engine from `packages/engine/dist`, so `make web` runs the engine build before starting the static server.
 
+Source layout:
+
+- `main.js`: app bootstrap, state, and high-level rendering flow
+- `mapData.js`: visual map anchors and label ids
+- `mapGeometry.js`: SVG parsing and province click geometry
+- `orderOptions.js`: selectable move, support, and convoy options
+- `arrows.js`: order-arrow geometry
+- `paneResizer.js`: order-panel resize behavior
+- `dom.js` and `unitShape.js`: DOM/SVG helpers
+
 Current scope:
 
 - render the Classic 1901 starting board from engine data
