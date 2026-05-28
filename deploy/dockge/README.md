@@ -16,7 +16,7 @@ After the stack is running, open:
 http://<nas-hostname-or-ip>:18080/
 ```
 
-The image serves the app at `/`. The legacy path `/packages/web/` is also present for compatibility with the local static-server prototype.
+The image serves the app at `/`. The legacy path `/packages/web/` is also present for compatibility with the earlier local prototype URL.
 
 ## First Setup
 

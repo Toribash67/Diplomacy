@@ -10,7 +10,7 @@ typecheck:
 	tsc -p packages/engine/tsconfig.json --noEmit
 
 web: build
-	python3 -m http.server 5173
+	node packages/server/src/server.mjs
 
 clean:
 	rm -rf packages/engine/dist

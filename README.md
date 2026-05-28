@@ -18,7 +18,7 @@ Run the browser prototype with:
 make web
 ```
 
-Then open `http://localhost:5173/packages/web/`.
+Then open `http://localhost:5173/packages/web/`. The development server serves the web UI and a single shared sandbox API, so refreshes keep the current game state while the server process is running.
 
 ## Container
 

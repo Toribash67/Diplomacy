@@ -1,4 +1,4 @@
-import { adjudicate, classic1901 } from "/packages/engine/dist/index.js";
+import { classic1901 } from "/packages/engine/dist/index.js";
 import { mapSize, positionForLocation, positionForProvince, provinceLabelIds, unitPositions } from "./mapData.js";
 import { arrowGeometry } from "./arrows.js";
 import { element, emptyOrderField, option, svg, text } from "./dom.js";
@@ -30,6 +30,7 @@ const landWaterShadowLayers = [
   { blur: 5, opacity: 0.72 },
   { blur: 1.6, opacity: 0.52 },
 ];
+const gameApiUrl = "/api/game";
 
 const board = document.querySelector("#board");
 const selection = document.querySelector("#selection");
@@ -74,6 +75,7 @@ let supplyCenterPositions = new Map();
 let waterPaths = [];
 let landWaterShadowImageUrl = undefined;
 let sanitizedMapImageUrl = mapImageUrl;
+let isServerRequestPending = false;
 
 const {
   alignSupportedUnitDraft,
@@ -130,6 +132,7 @@ const mapViewport = initializeMapViewport({
 loadProvinceGeometry();
 applyTheme();
 render();
+loadGame();
 
 async function loadProvinceGeometry() {
   const geometry = await loadMapGeometry({ mapImageUrl, provinceLabelIds, seaProvinceIds });
@@ -313,31 +316,92 @@ function applyTheme() {
 
 function handleRuleSettingsChange() {
   buildDrafts = new Map();
+  saveGameSettings();
   renderOrders();
 }
 
-function variantForCurrentSettings() {
-  if (state.phase.type !== "build" || !conqueredBuildsToggle.checked) {
-    return classic1901;
+async function loadGame() {
+  try {
+    const payload = await fetchGameApi("");
+    applyServerGame(payload);
+    if (!provinceById.has(selectedProvinceId) || (unitsInProvince(selectedProvinceId).length === 0 && retreatsFromProvince(selectedProvinceId).length === 0)) {
+      selectedProvinceId = defaultSelectedProvinceId();
+    }
+    render();
+  } catch (error) {
+    showServerError(error);
+  }
+}
+
+async function saveGameSettings() {
+  try {
+    await postGameApi("/settings", { settings: gameSettingsFromControls() });
+  } catch (error) {
+    showServerError(error);
+  }
+}
+
+function applyServerGame(payload) {
+  state = cloneState(payload.state);
+  lastResult = payload.lastResult ?? undefined;
+  landProvinceOwners = payload.landProvinceOwners ?? landProvinceOwnersFromUnits(state.units);
+  lastOrderUnitLabels = new Map(Object.entries(payload.orderUnitLabels ?? {}));
+
+  if (payload.settings) {
+    conqueredBuildsToggle.checked = Boolean(payload.settings.allowConqueredBuilds);
+    scConversionsToggle.checked = Boolean(payload.settings.allowScConversions);
+  }
+}
+
+function gameSettingsFromControls() {
+  return {
+    allowConqueredBuilds: conqueredBuildsToggle.checked,
+    allowScConversions: scConversionsToggle.checked,
+  };
+}
+
+async function fetchGameApi(path) {
+  const response = await fetch(`${gameApiUrl}${path}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  return readGameApiResponse(response);
+}
+
+async function postGameApi(path, body) {
+  const response = await fetch(`${gameApiUrl}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readGameApiResponse(response);
+}
+
+async function readGameApiResponse(response) {
+  const payload = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    throw new Error(payload?.error ?? `Game server request failed with status ${response.status}.`);
   }
 
-  return {
-    ...classic1901,
-    provinces: classic1901.provinces.map((province) => {
-      if (!province.supplyCenter) {
-        return province;
-      }
+  return payload;
+}
 
-      const owner = state.supplyCenterOwners[province.id];
-      return {
-        ...province,
-        supplyCenter: {
-          ...province.supplyCenter,
-          homePower: owner ?? province.supplyCenter.homePower,
-        },
-      };
-    }),
-  };
+function setServerRequestPending(isPending) {
+  isServerRequestPending = isPending;
+  submitOrdersButton.disabled = isPending;
+  resetGameButton.disabled = isPending;
+}
+
+function showServerError(error) {
+  console.error(error);
+  resultList.replaceChildren(element("div", {
+    className: "result-row invalid",
+    textContent: error instanceof Error ? error.message : "Game server request failed.",
+  }));
 }
 
 function renderArrowMarker(id, fill, size) {
@@ -642,7 +706,8 @@ function renderSelection() {
 
 function renderOrders() {
   orderList.replaceChildren();
-  submitOrdersButton.disabled = false;
+  submitOrdersButton.disabled = isServerRequestPending;
+  resetGameButton.disabled = isServerRequestPending;
 
   if (state.phase.type === "retreat") {
     renderRetreatOrders();
@@ -1096,7 +1161,11 @@ function renderPowerList() {
   }
 }
 
-function submitOrders() {
+async function submitOrders() {
+  if (isServerRequestPending) {
+    return;
+  }
+
   lastOrderUnitLabels = new Map([
     ...state.units,
     ...(state.retreats ?? []).map((retreat) => retreat.unit),
@@ -1107,17 +1176,20 @@ function submitOrders() {
       ? buildRetreatOrders()
       : buildBuildOrders();
 
-  const conversionOrders = orders.filter((order) => order.type === "convert");
-  const adjudicationOrders = orders.filter((order) => order.type !== "convert");
-  lastResult = adjudicate(state, adjudicationOrders, variantForCurrentSettings());
-  if (conversionOrders.length > 0) {
-    lastResult = applyConversionOrders(lastResult, conversionOrders);
+  setServerRequestPending(true);
+  try {
+    const payload = await postGameApi("/orders", {
+      orders,
+      settings: gameSettingsFromControls(),
+    });
+    applyServerGame(payload);
+  } catch (error) {
+    showServerError(error);
+    return;
+  } finally {
+    setServerRequestPending(false);
   }
-  state = cloneState(lastResult.nextState);
-  landProvinceOwners = {
-    ...landProvinceOwners,
-    ...landProvinceOwnersFromUnits(state.units),
-  };
+
   draftOrders = new Map();
   mapOrderUnitId = undefined;
   mapOrderIntent = undefined;
@@ -1129,70 +1201,6 @@ function submitOrders() {
   }
 
   render();
-}
-
-function applyConversionOrders(result, conversionOrders) {
-  const orderResults = { ...result.orderResults };
-  const nextUnits = [...result.nextState.units];
-  const convertedUnitIds = new Set();
-
-  for (const order of conversionOrders) {
-    const unitIndex = nextUnits.findIndex((unit) => unit.id === order.unitId);
-    const unit = nextUnits[unitIndex];
-    const destination = locationById.get(order.location);
-    const provinceId = destination?.province;
-    const province = provinceId ? provinceById.get(provinceId) : undefined;
-
-    let error = undefined;
-    if (!scConversionsToggle.checked) {
-      error = "Unit conversion is not enabled.";
-    } else if (!unit) {
-      error = "Conversion order references a unit that is not in the current state.";
-    } else if (convertedUnitIds.has(order.unitId)) {
-      error = "Only one conversion may be ordered for a unit.";
-    } else if (!destination || !province) {
-      error = "Conversion destination is unknown.";
-    } else if (locationProvince(unit.location) !== provinceId) {
-      error = "Conversion must stay in the unit's current supply center.";
-    } else if (!province.supplyCenter || state.supplyCenterOwners[provinceId] !== unit.power) {
-      error = "Conversion location is not an owned supply center.";
-    } else if (!destination.unitTypes.includes(order.unitType)) {
-      error = "Converted unit type cannot occupy that location.";
-    } else if (unit.type === order.unitType) {
-      error = "Conversion must change the unit type.";
-    }
-
-    if (error) {
-      orderResults[order.id] = {
-        order,
-        status: "invalid",
-        reason: error,
-      };
-      continue;
-    }
-
-    convertedUnitIds.add(order.unitId);
-    nextUnits[unitIndex] = {
-      ...unit,
-      type: order.unitType,
-      location: order.location,
-    };
-    orderResults[order.id] = {
-      order,
-      status: "succeeds",
-      reason: "Unit converted in an owned supply center.",
-    };
-  }
-
-  return {
-    ...result,
-    nextState: {
-      ...result.nextState,
-      units: nextUnits,
-    },
-    orderResults,
-    invalidOrders: Object.values(orderResults).filter((orderResult) => orderResult.status === "invalid"),
-  };
 }
 
 function buildMovementOrders() {
@@ -1830,18 +1838,27 @@ function selectProvince(provinceId) {
   render();
 }
 
-function resetGame() {
-  state = cloneState(classic1901.initialState);
-  lastResult = undefined;
-  lastOrderUnitLabels = new Map();
-  draftOrders = new Map();
-  mapOrderUnitId = undefined;
-  mapOrderIntent = undefined;
-  retreatDrafts = new Map();
-  buildDrafts = new Map();
-  landProvinceOwners = landProvinceOwnersFromUnits(state.units);
-  selectedProvinceId = "par";
-  render();
+async function resetGame() {
+  if (isServerRequestPending) {
+    return;
+  }
+
+  setServerRequestPending(true);
+  try {
+    const payload = await postGameApi("/reset", {});
+    applyServerGame(payload);
+    draftOrders = new Map();
+    mapOrderUnitId = undefined;
+    mapOrderIntent = undefined;
+    retreatDrafts = new Map();
+    buildDrafts = new Map();
+    selectedProvinceId = "par";
+    render();
+  } catch (error) {
+    showServerError(error);
+  } finally {
+    setServerRequestPending(false);
+  }
 }
 
 function unitsInProvince(provinceId) {

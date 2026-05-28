@@ -7,9 +7,18 @@ COPY . .
 RUN npm install --global typescript
 RUN tsc -p packages/engine/tsconfig.json
 
-FROM nginx:1.27-alpine
+FROM node:22-alpine
 
-COPY deploy/nginx/diplomacy-web.conf /etc/nginx/conf.d/default.conf
-COPY packages/web /usr/share/nginx/html
-COPY packages/web /usr/share/nginx/html/packages/web
-COPY --from=build /app/packages/engine/dist /usr/share/nginx/html/packages/engine/dist
+WORKDIR /app
+
+ENV HOST=0.0.0.0
+ENV PORT=80
+
+COPY packages/server /app/packages/server
+COPY packages/web /app/packages/web
+COPY packages/engine/package.json /app/packages/engine/package.json
+COPY --from=build /app/packages/engine/dist /app/packages/engine/dist
+
+EXPOSE 80
+
+CMD ["node", "packages/server/src/server.mjs"]

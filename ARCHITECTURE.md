@@ -38,6 +38,9 @@ packages/
       paneResizer.js
       styles.css
       unitShape.js
+  server/
+    src/
+      server.mjs
 ```
 
 The engine is tested with brewed TypeScript and Node's built-in test runner via:
@@ -46,13 +49,13 @@ The engine is tested with brewed TypeScript and Node's built-in test runner via:
 make test
 ```
 
-The browser prototype is served without package dependencies via:
+The browser prototype is served by a dependency-free Node backend via:
 
 ```sh
 make web
 ```
 
-The web package is intentionally split into small dependency-free modules. `main.js` owns bootstrapping, state, and high-level rendering flow. Focused modules own reusable DOM helpers, SVG unit shapes, map SVG parsing, map viewport gestures, pane resizing, arrow geometry, and order-option calculations.
+The web package is intentionally split into small dependency-free modules. `main.js` owns bootstrapping, state, and high-level rendering flow. Focused modules own reusable DOM helpers, SVG unit shapes, map SVG parsing, map viewport gestures, pane resizing, arrow geometry, and order-option calculations. The server package serves the UI, owns the single shared sandbox state, and calls the engine for submitted phase adjudication.
 
 ## Engine Model
 
@@ -282,29 +285,29 @@ The DATC suite is the main conformance safety net for movement, convoy, retreat,
 
 ### Web App
 
-The first UI should be a local playable web app that consumes the engine directly:
+The first UI is a local playable web app backed by a single sandbox server:
 
 - render board state
 - enter orders
-- adjudicate a phase
+- submit orders to the backend for adjudication
 - show results and explanations
 - inspect retreats/builds
 
-The current web prototype can also be built as a static container. The Docker image compiles the engine in a Node build stage, then serves `packages/web` and the compiled engine modules from nginx.
+The current web prototype can also be built as a container. The Docker image compiles the engine in a Node build stage, then runs the dependency-free Node server that serves `packages/web`, compiled engine modules, and the sandbox API.
 
 ### Frontend And Map Roadmap
 
-The rules engine is now stable enough to start a local frontend. The next milestone should be a playable classic-map prototype, not a backend service.
+The rules engine is now stable enough to support a local frontend backed by a minimal sandbox service.
 
-Status: a first dependency-free browser prototype exists in `packages/web`. It renders the Classic 1901 initial board from `classic1901.initialState`, uses separate render metadata in `mapData.js`, and can show province details, starting units, supply ownership, and an adjacency overlay.
+Status: a first dependency-free browser prototype exists in `packages/web`. It renders the Classic 1901 sandbox state returned by `packages/server`, uses separate render metadata in `mapData.js`, and can show province details, units, supply ownership, and an adjacency overlay.
 Order entry currently covers movement, support, convoy, retreat, disband, and winter build phases.
 
 Recommended order:
 
 1. Create a frontend package
    - Done as `packages/web`, beside `packages/engine`.
-   - It consumes the built engine modules directly.
-   - It starts with a local development server and no persistence.
+   - It consumes the built engine modules for variant data.
+   - It starts with a local development server and a single in-memory sandbox.
 
 2. Add a classic map render layer
    - Started with coordinate metadata keyed by `ProvinceId`.
@@ -324,8 +327,8 @@ Recommended order:
    - Keep the engine authoritative; frontend validation should help the user but not replace adjudication.
 
 5. Wire phase adjudication
-   - Keep a local in-memory `GameState`.
-   - Submit typed orders into `adjudicate`.
+   - Keep the authoritative `GameState` on the backend.
+   - Submit typed orders to the backend, which calls `adjudicate`.
    - Display per-order result status and reason.
    - Advance into retreat/build phases when the returned state requires it.
 
@@ -333,17 +336,18 @@ Recommended order:
    - Order list editing and deletion.
    - Clear phase/result panels.
    - Board overlays for successful moves, failed moves, dislodgements, retreats, and builds.
-   - Optional import/export of a JSON game snapshot before building a real backend.
+   - Optional import/export of a JSON game snapshot before adding durable persistence.
 
-7. Defer backend work
-   - Do not introduce users, deadlines, press, draw votes, or persistence until the local UI can play through phases.
-   - Once the local UI is usable, the async service can persist snapshots and submitted orders around the same pure engine boundary.
+7. Grow the backend deliberately
+   - The current backend is a single shared in-memory sandbox.
+   - Do not introduce users, deadlines, press, draw votes, or durable persistence until the local UI and single-game API settle.
+   - Once the sandbox service is usable, the async service can persist snapshots and submitted orders around the same pure engine boundary.
 
 ### NAS Deployment
 
-The initial deployment target is a static web container managed by Dockge:
+The initial deployment target is a web container managed by Dockge:
 
-- `Dockerfile` builds the engine and packages the web prototype into nginx.
+- `Dockerfile` builds the engine and packages the web prototype with the Node sandbox server.
 - `.github/workflows/web-container.yml` publishes `ghcr.io/toribash67/diplomacy-web:latest` on pushes to `main`.
 - `deploy/dockge/compose.yml` is the stack file to paste or import into Dockge.
 

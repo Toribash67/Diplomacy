@@ -14,7 +14,7 @@ Then open:
 http://localhost:5173/packages/web/
 ```
 
-The app imports the built engine from `packages/engine/dist`, so `make web` runs the engine build before starting the static server.
+The app imports variant data from the built engine in `packages/engine/dist`, so `make web` runs the engine build before starting the backend-backed web server.
 
 Source layout:
 
@@ -26,10 +26,11 @@ Source layout:
 - `arrows.js`: order-arrow geometry
 - `paneResizer.js`: order-panel resize behavior
 - `dom.js` and `unitShape.js`: DOM/SVG helpers
+- `../server/src/server.mjs`: single-sandbox backend that stores state and adjudicates submitted orders
 
 Current scope:
 
-- render the Classic 1901 starting board from engine data
+- render the current Classic 1901 sandbox state from the backend
 - use a local copy of the Wikimedia Commons standard Diplomacy SVG map
 - keep visual map metadata separate from variant rules data
 - inspect provinces, supply ownership, locations, and starting units
@@ -37,7 +38,7 @@ Current scope:
 - pan and zoom the map without browser page zoom
 - submit hold, adjacent move, support, and convoy orders for all powers
 - draft movement, support, and convoy orders with board-level buttons and map-selected targets
-- submit retreat, disband, and build orders through engine phase progression
+- submit movement, retreat, disband, build, and conversion orders through the backend
 - preview draft move, support, and convoy orders with map arrows
 
 Map attribution: `assets/diplomacy.svg` is based on [Diplomacy.svg](https://commons.wikimedia.org/wiki/File:Diplomacy.svg) by Martin Asal and contributors, licensed under CC BY-SA 3.0 and GFDL.
