@@ -116,12 +116,8 @@ export function initializeMapViewport({
   }
 
   function onWheel(event) {
-    if (!event.ctrlKey && !event.metaKey) {
-      return;
-    }
-
     const anchor = pointForClientPosition(pointerPosition(event));
-    const zoomFactor = Math.exp(-event.deltaY * wheelZoomSensitivity);
+    const zoomFactor = Math.exp(-normalizedWheelDeltaY(event) * wheelZoomSensitivity);
     zoomTo(currentZoom() * zoomFactor, anchor);
     event.preventDefault();
   }
@@ -283,6 +279,16 @@ function pointerPosition(event) {
     x: event.clientX,
     y: event.clientY,
   };
+}
+
+function normalizedWheelDeltaY(event) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * 16;
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * window.innerHeight;
+  }
+  return event.deltaY;
 }
 
 function distance(first, second) {
