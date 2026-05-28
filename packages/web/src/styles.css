@@ -494,6 +494,10 @@ h3 {
   display: none;
 }
 
+.unit {
+  cursor: pointer;
+}
+
 .unit-body {
   stroke: #111820;
   stroke-width: 1.1;

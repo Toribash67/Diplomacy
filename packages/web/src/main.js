@@ -587,6 +587,7 @@ function renderUnit(unit) {
     class: `unit ${unit.power}`,
     "aria-label": `${powerById.get(unit.power).name} ${unit.type} in ${province.name}`,
   });
+  group.addEventListener("click", () => selectProvince(location.province));
   group.append(unitShape(unit.type, x, y, powerColors[unit.power]));
   const labelX = unit.type === "fleet" ? x + 1.4 : x;
   group.append(text(unit.type === "army" ? "A" : "F", { class: "unit-label", x: labelX, y: y + 3 }));
